@@ -113,7 +113,7 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | `INV_ITEM~<name>~<token>~<encodedItem>` | one item per packet | Decoded by `NS.CB_ParseItemLine` |
 | `INV_END~<name>` | — | Clears the in-flight flag; renders if the inventory frame is open |
 | `QUESTS_BEGIN~<name>~<token>~<mode>` | — | Resets `entry.quests` |
-| `QUESTS_ITEM~<name>~<token>~<mode>~<status>~<questID>~<questName>` | status `C`/`I`; name URL-encoded | Appended as `{ id, status }` |
+| `QUESTS_ITEM~<name>~<token>~<mode>~<status>~<questID>~<questName>` | status `C`/`I`; name URL-encoded — but the current bridge fills it with the questID again (`SendQuestPacketsForBot`) | Appended as `{ id, status, name }`; `name` kept only when the field differs from the id (a real title), since quest Abandon must drop by title |
 | `QUESTS_END~<name>~<token>~<mode>` | — | Renders if the quest frame is open |
 
 ---

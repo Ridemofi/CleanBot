@@ -1509,7 +1509,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- Packets: QUESTS_BEGIN~name~token~mode
         --          QUESTS_ITEM~name~token~mode~status~questID~questName
         --          QUESTS_END~name~token~mode
-        -- status = "C" (complete) or "I" (incomplete). questName is URL-encoded.
+        -- status = "C" (complete) or "I" (incomplete). questName is URL-encoded, but the
+        -- current bridge fills it with the questID again — see the handler note below.
         elseif msg and strsub(msg, 1, 13) == "QUESTS_BEGIN~" then
             local rest  = strsub(msg, 14)
             local name  = NS.CB_SplitOnce(rest, "~")
@@ -1529,12 +1530,16 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local key   = strlower(name)
             local entry = CleanBot_PartyBots[key]
             if entry and entry.quests then
+                -- Needed by the Abandon button: the server's drop command matches by link
+                -- or title, so a bot-only quest must be dropped by NAME, not id. The
+                -- bridge currently sends the id AGAIN in the name field (MultiBotBridge
+                -- SendQuestPacketsForBot: UrlEncodeField(to_string(questId))), so only a
+                -- field that differs from the id is a real title (future-proofing).
+                questName = CB_UrlDecode(questName)
                 entry.quests[#entry.quests + 1] = {
                     id     = tonumber(questID),
                     status = status,
-                    -- Needed by the Abandon button: the server's drop command matches by
-                    -- link or title, so a bot-only quest must be dropped by NAME, not id.
-                    name   = questName ~= "" and CB_UrlDecode(questName) or nil,
+                    name   = (questName ~= "" and questName ~= questID) and questName or nil,
                 }
             end
 

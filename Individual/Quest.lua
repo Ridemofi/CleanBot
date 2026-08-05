@@ -418,13 +418,16 @@ NS.CB_RenderQuestDetail = function(key, questID)
 
     -- ── Wire the Abandon button to this quest ──────────────────────────────
     -- The server's drop command matches by |Hquest:| link or title substring — a bare
-    -- numeric id matches nothing, so the NAME is required. Bot record first (present
-    -- even for quests the player doesn't have), then the player's name cache.
+    -- numeric id matches nothing (extractQuestId needs an Hquest link), so the NAME is
+    -- required. Bot record first (carries the whisper-path link title; the bridge path
+    -- has no title — its name field is the id again), then the player's name cache.
     local abandonName = (botQuest and botQuest.name)
         or (questID and NS.questNameCache[questID])
 
     if f.abandonBtn then
-        f.abandonBtn:Enable()
+        -- No resolvable name (bridge path + quest the player doesn't have): the drop
+        -- command cannot address the quest, so disable rather than no-op on click.
+        if not abandonName then f.abandonBtn:Disable() else f.abandonBtn:Enable() end
         f.abandonBtn:SetScript("OnClick", function()
             if not entry or not abandonName then return end
             NS.CB_SendBotCommand(entry.name, "drop " .. abandonName)

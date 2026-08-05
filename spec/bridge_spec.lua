@@ -195,6 +195,18 @@ describe("Bridge addon packets (CHAT_MSG_ADDON)", function()
         assert.equals("The Missing Diplomat", e.quests[1].name)
     end)
 
+    it("does not store the id-repeated name field the current bridge sends", function()
+        -- MultiBotBridge fills the name field with to_string(questId); treating that as
+        -- a title would make Abandon send "drop 404", which matches nothing server-side.
+        local e = CleanBot_PartyBots.bot
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_BEGIN~Bot~tok~all")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_ITEM~Bot~tok~all~I~404~404")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_END~Bot~tok~all")
+
+        assert.equals(404, e.quests[1].id)
+        assert.is_nil(e.quests[1].name)
+    end)
+
     it("HELLO_ACK flips bridgeState to present and ends the login phase", function()
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
