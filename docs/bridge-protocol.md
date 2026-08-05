@@ -105,7 +105,7 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | Packet | Layout | Handling |
 |---|---|---|
 | `HELLO_ACK~…` | — | Drives the real state machine (see below) |
-| `ROSTER~<name>,…` | name up to first comma | Seeds a minimal bot entry if unknown |
+| `ROSTER~<rec>;<rec>;…` | one record per bot: `<name>,<classId>,<level>,<mapId>,<alive>,<hp%>,<mana%>` (`classId` = numeric `Player::getClass()`) | Seeds a minimal entry (name + class) for each unknown bot |
 | `DETAIL~<name>~?~?~<class>~…` | name + class | Establishes identity/class; preserves strategy data already parsed from `STATE~` |
 | `STATE~<name>~<combat>~<nonCombat>` | comma-separated strategy lists | Stored via `CB_StoreCombat` / `CB_StoreNonCombat`; creates a minimal entry if `STATE~` beats `ROSTER~` |
 | `INV_BEGIN~<name>~…` | — | Resets `entry.inventory = { items = {} }` |

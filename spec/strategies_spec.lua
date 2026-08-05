@@ -37,6 +37,13 @@ describe("Strategy token map", function()
         assert.equals("castTime", NS.STRATEGY_MAP["cast time"])
     end)
 
+    it("does not map timerSlider value commands (they never appear in a co? reply)", function()
+        -- Mapping "wait for attack time" would make CB_ParseTokens seed the numeric
+        -- waitAttackTime field to false on every reconcile, snapping the Delay slider.
+        assert.is_nil(NS.STRATEGY_MAP["wait for attack time"])
+        assert.equals("waitAttack", NS.STRATEGY_MAP["wait for attack"])  -- the checkbox token stays
+    end)
+
     it("maps the combat positioning + aggression tokens", function()
         assert.equals("posClose",   NS.STRATEGY_MAP["close"])    -- Positioning Mode dropdown
         assert.equals("posRanged",  NS.STRATEGY_MAP["ranged"])
@@ -99,6 +106,17 @@ describe("Combat strategy defaults", function()
         assert.is_nil(t.assistAoe)
         assert.is_nil(t.assistTank)
         assert.is_nil(t.avoidAggro)  -- none/DPS sub-section leaf still maps but seeds off
+    end)
+end)
+
+describe("CB_StoreCombat reconcile", function()
+    it("replaces flags from the reply but carries numeric timer values across", function()
+        local entry = { class = "WARRIOR", combat = { waitAttackTime = 7, focusFire = true } }
+        NS.CB_StoreCombat(entry, "Strategies: cast time, boost")
+        assert.is_true(entry.combat.castTime)
+        assert.is_true(entry.combat.useCooldowns)
+        assert.is_false(entry.combat.focusFire)     -- not in the reply → off (normal reconcile)
+        assert.equals(7, entry.combat.waitAttackTime) -- numeric value survives the replace
     end)
 end)
 

@@ -13,6 +13,9 @@
 -- self-sufficient regardless of spec order.
 if not CleanBotNS.CB_ParseItemLine then dofile("Individual/Inventory.lua") end
 if not CleanBotNS.CB_EnqueueRequest then dofile("Bridge.lua") end
+-- The ROSTER~ handler seeds entries via CB_DefaultCombat/CB_DefaultClassData.
+if not CleanBotNS.STRATEGY_MAP   then dofile("Individual/Strategies.lua") end
+if not CleanBotNS.SPEC_DPS_TOKEN then dofile("Individual/ClassData.lua") end
 local NS = CleanBotNS
 
 -- Item line as the bot streams it (the "items"/"bank" reply format).
@@ -166,6 +169,32 @@ describe("Bridge addon packets (CHAT_MSG_ADDON)", function()
         assert.is_nil(e.inventory)   -- the no-bridge guard dropped it
     end)
 
+    it("seeds every bot from a multi-record ROSTER~ payload with its class", function()
+        CleanBot_PartyBots = {}
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT",
+            "ROSTER~Botone,8,80,571,1,100,95;Bottwo,6,80,571,1,100,0")
+
+        local one, two = CleanBot_PartyBots.botone, CleanBot_PartyBots.bottwo
+        assert.is_not_nil(one)
+        assert.is_not_nil(two)   -- the regression: only the first record was parsed
+        assert.equals("Botone", one.name)
+        assert.equals("MAGE", one.class)          -- class id 8
+        assert.equals("DEATHKNIGHT", two.class)   -- class id 6
+        assert.is_not_nil(one.combat)             -- defaults seeded
+    end)
+
+    it("stores quest id, status, and the URL-decoded name from a QUESTS burst", function()
+        local e = CleanBot_PartyBots.bot
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_BEGIN~Bot~tok~all")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_ITEM~Bot~tok~all~I~404~The%20Missing%20Diplomat")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUESTS_END~Bot~tok~all")
+
+        assert.equals(1, #e.quests)
+        assert.equals(404, e.quests[1].id)
+        assert.equals("I", e.quests[1].status)
+        assert.equals("The Missing Diplomat", e.quests[1].name)
+    end)
+
     it("HELLO_ACK flips bridgeState to present and ends the login phase", function()
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
@@ -208,9 +237,24 @@ describe("Quest list collection (whisper)", function()
         assert.equals(2, #e.quests)
         assert.equals(101, e.quests[1].id)
         assert.equals("I", e.quests[1].status)
+        assert.equals("Wolves", e.quests[1].name)   -- link title, needed by Abandon ("drop <name>")
         assert.equals(202, e.quests[2].id)
         assert.equals("C", e.quests[2].status)
         assert.is_false(e.awaitingQuests)
+    end)
+
+    it("keeps the stale quest list when the reply never arrives (wipe guard)", function()
+        local e = { name = "Bot", quests = { { id = 999, status = "I" } },
+                    awaitingQuests = true, questStaging = {}, questReplyArrived = false,
+                    questStatus = "I" }
+        CleanBot_PartyBots = { bot = e }
+
+        Mock.tick(0.6)   -- silence timeout fires with empty staging
+
+        assert.equals(1, #e.quests)
+        assert.equals(999, e.quests[1].id)
+        assert.is_false(e.awaitingQuests)
+        assert.is_nil(e.questStaging)
     end)
 
     it("treats a title containing 'Complete' as a quest, not a section header", function()
@@ -314,6 +358,18 @@ describe("Stats reply parsing", function()
         assert.equals(16, e.inventory.bagTotal)
         assert.equals(4,  e.inventory.bagUsed)   -- 16 total - 12 free
         assert.is_false(e.awaitingMoney)
+    end)
+
+    it("does not read the repair cost as coins when a denomination is missing", function()
+        local e = { name = "Bot", inventory = { items = {} }, awaitingMoney = true }
+        CleanBot_PartyBots = { bot = e }
+
+        -- Broke-ish bot: wallet is 50s only; the repair cost (2g 30s 5c) is money-formatted.
+        Mock.fireEvent("CHAT_MSG_WHISPER", "50s, 12/16 Bag, 87% (2g 30s 5c) Dur, 45/67% XP", "Bot")
+
+        assert.equals(0,  e.money.gold)     -- must NOT pick up the repair cost's 2g
+        assert.equals(50, e.money.silver)
+        assert.equals(0,  e.money.copper)   -- must NOT pick up the repair cost's 5c
     end)
 end)
 

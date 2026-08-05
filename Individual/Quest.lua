@@ -358,6 +358,16 @@ NS.CB_RenderQuestDetail = function(key, questID)
     end
     local hasData = logIndex ~= nil
 
+    -- The bot-side quest record — carries the quest NAME even for quests the player
+    -- doesn't have (stored from the QUESTS_ITEM packet / whisper quest link).
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local botQuest
+    if questID and entry and entry.quests then
+        for _, q in ipairs(entry.quests) do
+            if q.id == questID then botQuest = q break end
+        end
+    end
+
     local titleText   = ""
     local questDesc   = ""   -- NPC flavor text (1st return of GetQuestLogQuestText)
     local questObj    = ""   -- "Bring X to Y" instructions (2nd return)
@@ -402,19 +412,21 @@ NS.CB_RenderQuestDetail = function(key, questID)
         end
         SelectQuestLogEntry(prevSel or 0)
     else
-        titleText = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
+        titleText = (botQuest and botQuest.name)
+            or (questID and NS.questNameCache[questID]) or tostring(questID or "?")
     end
 
     -- ── Wire the Abandon button to this quest ──────────────────────────────
-    -- Resolve the quest name from the bridge packet (most reliable — present
-    -- even for quests the player doesn't have). Fall back to the name cache.
-    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
-    local abandonName = (questID and NS.questNameCache[questID]) or tostring(questID or "?")
+    -- The server's drop command matches by |Hquest:| link or title substring — a bare
+    -- numeric id matches nothing, so the NAME is required. Bot record first (present
+    -- even for quests the player doesn't have), then the player's name cache.
+    local abandonName = (botQuest and botQuest.name)
+        or (questID and NS.questNameCache[questID])
 
     if f.abandonBtn then
         f.abandonBtn:Enable()
         f.abandonBtn:SetScript("OnClick", function()
-            if not entry then return end
+            if not entry or not abandonName then return end
             NS.CB_SendBotCommand(entry.name, "drop " .. abandonName)
             -- Disable the button and wait 2 seconds before re-fetching.
             -- The bot processes the command server-side; there is no structured

@@ -30,6 +30,12 @@ NS.CB_CleanItemLink = function(rawLink)
     return apiLink or rawLink
 end
 
+-- Numeric class ids as sent in ROSTER~ records (Player::getClass()); 10 is unused.
+local CLASS_ID_TOKENS = {
+    [1] = "WARRIOR", [2] = "PALADIN", [3] = "HUNTER",  [4] = "ROGUE",   [5] = "PRIEST",
+    [6] = "DEATHKNIGHT", [7] = "SHAMAN", [8] = "MAGE", [9] = "WARLOCK", [11] = "DRUID",
+}
+
 -- ============================================================
 -- Bot discovery / roster helpers
 -- These support bot identification and class resolution during the
@@ -540,8 +546,12 @@ end
 local function CB_FinalizeQuestCollection(key, entry)
     entry.awaitingQuests = false
     entry.questTimeout   = 0
-    entry.quests         = entry.questStaging or {}
-    entry.questStaging   = nil
+    -- Only swap when the reply actually arrived: a lost/late reply times out with
+    -- empty staging, and overwriting would wipe a good list (mirrors invReplyArrived).
+    if entry.questReplyArrived and entry.questStaging then
+        entry.quests = entry.questStaging
+    end
+    entry.questStaging = nil
     local f = NS.botQuestFrames and NS.botQuestFrames[key]
     if f and f:IsShown() and NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
 end
@@ -965,7 +975,7 @@ end
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
 -- CHAT_MSG_ADDON block. Whisper fallback sends "quests" and parses the reply
--- lines in the CHAT_MSG_WHISPER handler into the same { {id, status} } shape.
+-- lines in the CHAT_MSG_WHISPER handler into the same { {id, status, name} } shape.
 -- The live entry.quests is intentionally NOT cleared here: the bridge path
 -- resets it on QUESTS_BEGIN, and the whisper path swaps fresh data in on
 -- finalize (CB_FinalizeQuestCollection) — so the last render survives on screen
@@ -984,10 +994,11 @@ NS.CB_FetchQuests = function(key, botName)
         -- Lines are collected into staging keyed by section header (Incompleted/Completed) and
         -- swapped in on the summary line or after silence (invTickFrame).
         NS.CB_EnqueueRequest(key, function()
-            entry.awaitingQuests = true
-            entry.questTimeout   = 0
-            entry.questStatus    = "I"   -- current section; flipped by reply headers
-            entry.questStaging   = {}
+            entry.awaitingQuests    = true
+            entry.questTimeout      = 0
+            entry.questStatus       = "I"   -- current section; flipped by reply headers
+            entry.questStaging      = {}
+            entry.questReplyArrived = false
             -- "quests all" (not bare "quests", which only prints the summary) makes the
             -- bot stream the per-quest lines + section headers we parse — mirrors the
             -- bridge's GET~QUESTS~ALL mode.
@@ -1200,9 +1211,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 entry.awaitingMoney = false
                 entry.statsAt       = GetTime()   -- mark fresh for the CB_FetchStats TTL
 
-                local gold   = tonumber(clean:match("(%d+)g")) or 0
-                local silver = tonumber(clean:match("(%d+)s")) or 0
-                local copper = tonumber(clean:match("(%d+)c")) or 0
+                -- Coins live before the Bag field; the repair cost inside "(…) Dur" is
+                -- money-formatted too, so a missing denomination must not match it.
+                local moneyPart = clean:match("^(.-)%d+/%d+%s*Bag") or ""
+                local gold   = tonumber(moneyPart:match("(%d+)g")) or 0
+                local silver = tonumber(moneyPart:match("(%d+)s")) or 0
+                local copper = tonumber(moneyPart:match("(%d+)c")) or 0
                 entry.money  = { gold = gold, silver = silver, copper = copper }
 
                 -- Bag totals are not available from the "items" whisper, but stats gives them.
@@ -1235,13 +1249,18 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- Status comes from the active section; the quest ID from the |Hquest:ID:
         -- link. Collected into questStaging, swapped into entry.quests on finalize.
         if entry and entry.awaitingQuests then
-            entry.questTimeout = 0
+            entry.questTimeout      = 0
+            entry.questReplyArrived = true
             -- Quest lines carry a |Hquest:ID: link — match that FIRST so a quest
             -- whose title contains "Complete"/"Incomplete" isn't mistaken for a
             -- section header. Headers (no link) only set the current status.
             local id = tonumber(msg:match("|Hquest:(%d+):"))
             if id then
-                entry.questStaging[#entry.questStaging + 1] = { id = id, status = entry.questStatus }
+                entry.questStaging[#entry.questStaging + 1] = {
+                    id     = id,
+                    status = entry.questStatus,
+                    name   = msg:match("%[(.-)%]"),   -- bracketed link title (see QUESTS_ITEM note)
+                }
             elseif msg:find("Summary", 1, true) or msg:match("^%s*Total:") then
                 CB_FinalizeQuestCollection(key, entry)
             elseif msg:find("Incomplet", 1, true) then
@@ -1350,17 +1369,24 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             return
 
         elseif msg and strsub(msg, 1, 7) == "ROSTER~" then
-            local name = strmatch(msg, "^ROSTER~([^,]+),")
-            if name then
-                local key = strlower(name)
-                if not CleanBot_PartyBots[key] then
-                    CleanBot_PartyBots[key] = {
-                        name      = name,
-                        class     = "WARRIOR",
-                        combat    = NS.CB_DefaultCombat(),
-                        nonCombat = NS.CB_DefaultNonCombat(),
-                        classData = NS.CB_DefaultClassData("WARRIOR"),
-                    }
+            -- One packet packs EVERY bot: "Name,classId,level,mapId,alive,hp,mana;Name2,…"
+            -- (";"-separated records, ","-separated fields; classId = Player::getClass()).
+            -- Seed each bot's identity + class here; DETAIL~/STATE~ fill in the rest.
+            for record in gmatch(strsub(msg, 8), "[^;]+") do
+                local name, r2  = NS.CB_SplitOnce(record, ",")
+                local classId   = NS.CB_SplitOnce(r2, ",")
+                if name ~= "" then
+                    local key = strlower(name)
+                    if not CleanBot_PartyBots[key] then
+                        local class = CLASS_ID_TOKENS[tonumber(classId)] or "WARRIOR"
+                        CleanBot_PartyBots[key] = {
+                            name      = name,
+                            class     = class,
+                            combat    = NS.CB_DefaultCombat(),
+                            nonCombat = NS.CB_DefaultNonCombat(),
+                            classData = NS.CB_DefaultClassData(class),
+                        }
+                    end
                 end
             end
 
@@ -1499,13 +1525,16 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local _,      r3        = NS.CB_SplitOnce(r2,   "~")  -- skip token
             local _,      r4        = NS.CB_SplitOnce(r3,   "~")  -- skip mode
             local status, r5        = NS.CB_SplitOnce(r4,   "~")
-            local questID = NS.CB_SplitOnce(r5, "~")
+            local questID, questName = NS.CB_SplitOnce(r5, "~")
             local key   = strlower(name)
             local entry = CleanBot_PartyBots[key]
             if entry and entry.quests then
                 entry.quests[#entry.quests + 1] = {
                     id     = tonumber(questID),
                     status = status,
+                    -- Needed by the Abandon button: the server's drop command matches by
+                    -- link or title, so a bot-only quest must be dropped by NAME, not id.
+                    name   = questName ~= "" and CB_UrlDecode(questName) or nil,
                 }
             end
 

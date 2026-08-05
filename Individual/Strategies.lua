@@ -307,6 +307,9 @@ do
     -- the co? reply parser recognizes whichever token a class actually reports
     -- (e.g. a druid healer reports "resto", a DK tank reports "blood").
     local function mapTokens(s)
+        -- timerSlider cmds ("wait for attack time") are value commands, never co?
+        -- reply tokens — mapping one would make the parser seed its numeric field false.
+        if s.type == "timerSlider" then return end
         NS.STRATEGY_MAP[s.cmd] = s.field
         if s.cmdByClass then
             for _, alt in pairs(s.cmdByClass) do NS.STRATEGY_MAP[alt] = s.field end
@@ -582,7 +585,15 @@ end
 ---@param combatStr string  The bot's "co ?" reply text.
 NS.CB_StoreCombat = function(entry, combatStr)
     if not entry then return end
+    local prev = entry.combat
     entry.combat = NS.CB_ParseCombatStr(combatStr)
+    -- Timer values (numbers) come from commands, not co tokens — a co? reply can't
+    -- report them, so carry the optimistically-stored numbers across the replace.
+    if prev then
+        for field, val in pairs(prev) do
+            if type(val) == "number" then entry.combat[field] = val end
+        end
+    end
     if not entry.classData then entry.classData = NS.CB_DefaultClassData(entry.class) end
     entry.classData.combat = NS.CB_ParseClassStr(combatStr, entry.class, "combat")
     CB_VerifyStrategyExpect(entry, "combat")
