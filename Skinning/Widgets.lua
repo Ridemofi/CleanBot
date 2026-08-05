@@ -322,7 +322,9 @@ end
 -- icon). String rows keep the template's default look.
 --
 -- Returns a container frame with the following API:
---   container:SetItems(items)           — populates rows; clears any previous selection.
+--   container:SetItems(items[, preserveScroll]) — populates rows; clears any previous
+--     selection. preserveScroll keeps the clamped scroll position for refresh-in-place
+--     rebuilds (roster/state packets); default scrolls back to the top (new content).
 --   container:GetSelected()             — returns the currently selected item (string or
 --                                         table), or nil if nothing is selected.
 --   container:SetSelectedValue(value)   — programmatic selection by row value; no onSelect.
@@ -604,15 +606,19 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         if scrollBar then scrollBar:SetValue(scrollBar:GetValue() - delta * ROW_H) end
     end)
 
-    container.SetItems = function(self, newItems)
+    container.SetItems = function(self, newItems, preserveScroll)
         items         = newItems or {}
         selectedIndex = nil
         selectedSet   = {}
         anchorIndex   = nil
-        -- Clamp (don't reset) the scroll position: roster-driven rebuilds fire on
-        -- every bot state packet, and jumping to the top loses the user's place.
-        local maxOffset = math.max(0, #items - numVisible)
-        if (sf.offset or 0) > maxOffset then sf.offset = maxOffset end
+        if preserveScroll then
+            -- Refresh-in-place (roster/state-packet rebuilds of the same content):
+            -- keep the user's scroll position, clamped to the new extent.
+            local maxOffset = math.max(0, #items - numVisible)
+            if (sf.offset or 0) > maxOffset then sf.offset = maxOffset end
+        else
+            sf.offset = 0   -- new content: back to the top
+        end
         if scrollBar then scrollBar:SetValue((sf.offset or 0) * ROW_H) end
         refresh()
     end

@@ -774,7 +774,9 @@ local function CB_ApplyGroupSelection(fromUserClick)
     local members, items = CB_ResolveSelectedMembers(selectedGroupValues)
     currentMembers = members
     currentItems   = items
-    memberList:SetItems(items)
+    -- Same-set internal refresh keeps the scroll position; a user click / changed
+    -- group set is new content and starts at the top.
+    memberList:SetItems(items, prev ~= nil)
     if prev then memberList:SetSelectedValues(prev) else memberList:SelectAllValues() end
 
     lastAppliedSignature = signature
@@ -788,7 +790,7 @@ end
 -- selection (SetSelectedValues re-highlights without firing the callback).
 local function CB_RebuildGroupListOnly()
     if not (NS.groupPanel and groupList) then return end
-    groupList:SetItems(CB_GroupItems())
+    groupList:SetItems(CB_GroupItems(), true)   -- state-packet refresh: keep scroll
     if selectedGroupValues then groupList:SetSelectedValues(selectedGroupValues) end
 end
 
@@ -819,7 +821,7 @@ NS.CB_RefreshGroupTab = function()
     end
 
     local items = CB_GroupItems()
-    groupList:SetItems(items)
+    groupList:SetItems(items, true)   -- roster refresh of the same list: keep scroll
 
     -- Restore the previous group selection, dropping groups that vanished. Fall
     -- back to the first item ("All") on the first show, or when a non-empty

@@ -548,7 +548,7 @@ NS.CleanBot_BuildManageTab = function()
     local function refreshPresetEntries()
         if not selectedPresetName then return end
         local entries = (CleanBot_SavedVars.presets or {})[selectedPresetName] or {}
-        presetList2:SetItems(entries)
+        presetList2:SetItems(entries, true)   -- same preset re-populated: keep scroll
     end
 
     -- ── Popups ────────────────────────────────────────────
