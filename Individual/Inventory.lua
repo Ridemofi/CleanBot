@@ -172,7 +172,8 @@ local function CB_ShowInvMenu(cell, key)
                 if not entry then return end
                 NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
                 -- Optimistic update: decrement stack or clear cell immediately.
-                local curCount = tonumber(cell.countText:GetText()) or 1
+                -- IsShown gate: a hidden countText still holds the previous occupant's number.
+                local curCount = cell.countText:IsShown() and tonumber(cell.countText:GetText()) or 1
                 if curCount > 1 then
                     cell.countText:SetText(curCount - 1)
                 else

@@ -30,7 +30,10 @@ local function record(widget, slot, data)
     if not byWidget then byWidget = {}; recordMap[widget] = byWidget end
     local rec = byWidget[slot]
     if rec then
-        rec.ref, rec.parent, rec.corner, rec.fn = data.ref, data.parent, data.corner, data.fn
+        -- kind must update too: below↔ahead share the "flow" slot, and replay
+        -- dispatches on kind — a stale kind replays the OLD helper with the new ref.
+        rec.kind, rec.ref, rec.parent, rec.corner, rec.fn =
+            data.kind, data.ref, data.parent, data.corner, data.fn
     else
         data.w, data.slot = widget, slot
         byWidget[slot] = data
@@ -41,6 +44,20 @@ end
 -- Widgets/frames whose margin/padding fields were stamped (copied) from NS.MARGIN/NS.PADDING at
 -- creation, so CB_RestampAll can refresh them when those tables change. Populated by the factories.
 NS.CB_stampables = NS.CB_stampables or {}
+
+--- Retires a widget's flow record (if any). Call before manually re-anchoring a widget
+--- that was previously placed with CB_AnchorBelow/Ahead — otherwise CB_ReplayAnchors
+--- re-applies the stale flow placement on top of the manual points on layout change.
+---@param widget table
+NS.CB_UnanchorFlow = function(widget)
+    local byWidget = recordMap[widget]
+    local rec = byWidget and byWidget.flow
+    if not rec then return end
+    byWidget.flow = nil
+    for i, r in ipairs(recordList) do
+        if r == rec then table.remove(recordList, i) break end
+    end
+end
 
 --- Registers a stamped widget (idempotent) so CB_RestampAll refreshes it.
 ---@param widget table  A widget carrying _marginType, or a frame carrying _paddingRole.

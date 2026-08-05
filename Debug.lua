@@ -337,14 +337,20 @@ timingTicker:Hide()
 
 local function timingStartRun()
     if not timing then return end
-    timing.run = {
-        sendTime = GetTime(),
-        lines    = 0,
-        gapSum   = 0,
-        gapN     = 0,
-        maxGap   = 0,
-    }
-    NS.CB_SendBotCommand(timing.name, "items")
+    -- Enqueue and stamp sendTime when the whisper actually leaves the per-bot serial
+    -- queue — stamping at enqueue would fold queue wait into the measured latency.
+    local session = timing
+    NS.CB_EnqueueRequest(session.key, function()
+        if timing ~= session then return end
+        timing.run = {
+            sendTime = GetTime(),
+            lines    = 0,
+            gapSum   = 0,
+            gapN     = 0,
+            maxGap   = 0,
+        }
+        NS.CB_SendBotCommandRaw(session.name, "items")
+    end)
 end
 
 local function timingReport()
@@ -379,7 +385,7 @@ end
 timingTicker:SetScript("OnUpdate", function()
     if not timing then timingTicker:Hide(); return end
     local run = timing.run
-    if not run then timingTicker:Hide(); return end
+    if not run then return end   -- send still waiting in the serial queue
     local now = GetTime()
     if run.firstAt then
         -- Run is complete after a generous fixed measurement window of silence

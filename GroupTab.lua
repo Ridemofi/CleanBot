@@ -570,6 +570,8 @@ local function CB_EnsureGroupClassContent(class)
     frame.paddingRight  = groupCtrl.paddingRight
     frame.paddingTop    = groupCtrl.paddingTop
     frame.paddingBottom = groupCtrl.paddingBottom
+    frame._paddingRole  = groupCtrl._paddingRole or "panel"  -- re-stamped live on layout change
+    NS.CB_RegisterStampable(frame)
     classContents[class] = frame
 
     NS.groupClassFrames[class] = NS.CB_BuildClassTabContent(frame, class,

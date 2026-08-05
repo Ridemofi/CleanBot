@@ -54,7 +54,7 @@ local function CB_ShowEquipMenu(btn)
         unequip.func         = function()
             local botName = btn.slot.name
             if not botName then return end
-            NS.CB_SendBotCommand(botName, "ue " .. btn.itemLink)
+            NS.CB_SendBotCommand(botName, "ue " .. NS.CB_CleanItemLink(btn.itemLink))
         end
         UIDropDownMenu_AddButton(unequip)
 
@@ -93,7 +93,7 @@ local function CB_StopUnequipDrag()
             d.dropCell.itemLink = d.itemLink
 
             entry.pendingValidation = { link = d.itemLink, expectPresent = true }
-            NS.CB_SendBotCommand(entry.name, "ue " .. d.itemLink)
+            NS.CB_SendBotCommand(entry.name, "ue " .. NS.CB_CleanItemLink(d.itemLink))
             local capturedSlot = d.slot
             local capturedKey  = d.slot.key
             NS.CB_After(1.5, function()

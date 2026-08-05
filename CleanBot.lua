@@ -255,9 +255,10 @@ NS.MARGIN_DEFAULTS = {
     section  = { top = 0, bottom = 0, left = 0, right = 0 },
 }
 -- Canonical defaults for theme settings — read by the Defaults button.
--- accentColor.a is set to the skin-appropriate value at PLAYER_LOGIN (after ElvUI detection):
---   0 (fully transparent) for plain Blizzard UI — no visible border tint by default.
---   1 (fully opaque)      for ElvUI             — matches ElvUI's solid border style.
+-- accentColor is replaced with the skin-appropriate default at PLAYER_LOGIN (after
+-- ElvUI detection): black opaque for ElvUI (matches its solid border style), white
+-- opaque for plain Blizzard UI. NS.accentColor is seeded from the same value there,
+-- so a fresh install looks exactly like what the Defaults button applies.
 NS.THEME_DEFAULTS = {
     scale        = 100,
     transparency = 90,
@@ -485,6 +486,8 @@ initFrame:SetScript("OnEvent", function(self, event)
         NS.THEME_DEFAULTS.accentColor   = defaultAccentColor
         NS.THEME_DEFAULTS.transparency  = defaultTransparency
         NS.transparency                 = defaultTransparency
+        NS.accentColor = { r = defaultAccentColor.r, g = defaultAccentColor.g,
+                           b = defaultAccentColor.b, a = defaultAccentColor.a }
 
         -- Initialize saved variables, preserving any existing data
         if type(CleanBot_SavedVars) ~= "table" then CleanBot_SavedVars = {} end

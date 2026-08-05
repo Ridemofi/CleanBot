@@ -609,8 +609,11 @@ NS.CB_CreateSelectList = function(parent, name, width, height, onSelect, multiSe
         selectedIndex = nil
         selectedSet   = {}
         anchorIndex   = nil
-        sf.offset = 0
-        if scrollBar then scrollBar:SetValue(0) end
+        -- Clamp (don't reset) the scroll position: roster-driven rebuilds fire on
+        -- every bot state packet, and jumping to the top loses the user's place.
+        local maxOffset = math.max(0, #items - numVisible)
+        if (sf.offset or 0) > maxOffset then sf.offset = maxOffset end
+        if scrollBar then scrollBar:SetValue((sf.offset or 0) * ROW_H) end
         refresh()
     end
 
@@ -1085,13 +1088,24 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
     -- Guard against re-entrancy when applyBoxValue moves the slider thumb.
     local updating = false
 
+    -- Last value delivered to onChange (or synced silently). Commits compare against
+    -- it so a focus loss with an unchanged value — e.g. the global click-anywhere
+    -- focus clear — doesn't re-fire onChange and echo a command to the bots.
+    local lastCommitted = nil
+
+    local function commit(v)
+        if v == lastCommitted then return end
+        lastCommitted = v
+        if onChange then onChange(v) end
+    end
+
     -- Sync: slider → editbox → onChange.
     -- Skipped when applyBoxValue is already driving the update to avoid double-firing.
     s:SetScript("OnValueChanged", function(self, val)
         if updating then return end
         local v = math.floor(val + 0.5)
         box:SetText(tostring(v))
-        if onChange then onChange(v) end
+        commit(v)
     end)
 
     -- Sync: editbox → slider.
@@ -1106,7 +1120,7 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
             updating = true
             s:SetValue(thumbPos)
             updating = false
-            if onChange then onChange(v) end
+            commit(v)
         else
             box:SetText(tostring(math.floor(s:GetValue() + 0.5)))
         end
@@ -1135,6 +1149,9 @@ NS.CB_CreateSlider = function(parent, name, title, softMin, softMax, defaultVal,
         s:SetValue(v)
         updating = false
         box:SetText(text or tostring(math.floor(v + 0.5)))
+        -- A silent numeric sync becomes the new committed baseline; a text override
+        -- (mixed-group "???") clears it so the next user commit always fires.
+        lastCommitted = not text and math.floor(v + 0.5) or nil
     end
 
     -- Snapshot original colors for Enable/Disable — must be read after HandleSliderFrame

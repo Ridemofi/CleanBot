@@ -29,6 +29,10 @@ NS.FORMATIONS = {
 --- Used by the Manage tab, which has no single selection.
 ---@param cmd string  The bot command to broadcast.
 NS.CB_SendGroupCommand = function(cmd)
+    if NS.debugSimulate then
+        NS.CB_Print("|cff888888[simulate]|r → group: " .. cmd)
+        return
+    end
     if GetNumRaidMembers() > 0 then
         SendChatMessage(cmd, "RAID")
     elseif GetNumPartyMembers() > 0 then

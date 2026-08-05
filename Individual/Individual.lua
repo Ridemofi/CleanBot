@@ -1984,6 +1984,9 @@ NS.CleanBot_RefreshTabs = function()
             if prevTabBtn then
                 NS.CB_AnchorAhead(slot.tabBtn, prevTabBtn)
             else
+                -- Retire any "ahead" record from a prior reflow (this tab wasn't first
+                -- then) so a layout replay can't re-anchor it to a departed tab.
+                NS.CB_UnanchorFlow(slot.tabBtn)
                 slot.tabBtn:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left + (slot.tabBtn.marginLeft or 0), 0)
             end
             slot.tabBtn:Show()

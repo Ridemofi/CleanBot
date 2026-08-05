@@ -103,6 +103,29 @@ describe("anchor record + replay", function()
         assert.equals(1, w.cleared)    -- replay must NOT ClearAllPoints (would wipe the inline RIGHT)
     end)
 
+    it("switching flow helpers updates the record kind (below → ahead)", function()
+        local w = stub(); w._parent = stub()
+        NS.CB_AnchorBelow(w, stub())
+        NS.CB_AnchorAhead(w, stub())   -- same "flow" slot, different helper
+        local rec
+        for _, r in ipairs(NS.CB_layoutRecords) do if r.w == w then rec = r end end
+        assert.equals("ahead", rec.kind)   -- replay must re-run Ahead, not the stale Below
+    end)
+
+    it("CB_UnanchorFlow retires the flow record but keeps wall records", function()
+        local parent = stub()
+        local w = stub(); w._parent = parent
+        NS.CB_AnchorAhead(w, stub())
+        NS.CB_AnchorWall(w, parent, "RIGHT")
+        NS.CB_UnanchorFlow(w)
+        local sp = w.setpoints
+        NS.CB_ReplayAnchors()
+        assert.equals(sp + 1, w.setpoints)   -- only the wall record replayed, not the flow
+        local c = recordCount()
+        NS.CB_AnchorAhead(w, stub())         -- re-anchoring records fresh, no duplicate
+        assert.equals(c + 1, recordCount())
+    end)
+
     it("CB_AnchorWall records additively and replays (flow + wall coexist on one widget)", function()
         local parent = stub()
         local w = stub(); w._parent = parent

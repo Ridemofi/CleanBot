@@ -276,6 +276,8 @@ NS.CleanBot_BuildManageTab = function()
     manageScrollContainer.paddingBottom = NS.managePanel.paddingBottom
     manageScrollContainer.paddingLeft   = NS.managePanel.paddingLeft
     manageScrollContainer.paddingRight  = NS.managePanel.paddingRight
+    manageScrollContainer._paddingRole  = NS.managePanel._paddingRole or "panel"  -- re-stamped live
+    NS.CB_RegisterStampable(manageScrollContainer)
 
     NS.manageScrollFrame, NS.manageScrollChild = NS.CB_CreateScrollFrame(
         manageScrollContainer, "CleanBotManageScrollFrame")
@@ -463,7 +465,7 @@ NS.CleanBot_BuildManageTab = function()
     local inviteBotBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotPresetInviteBotBtn",
         "Invite Bot", 110, 24)
     inviteBotBtn.marginLeft = NS.COLUMN_GAP
-    NS.CB_AnchorAhead(inviteBotBtn, invitePresetBtn)
+    -- Anchored below, once presetList2 exists (its left edge is the alignment target).
 
     -- ── Row 2: Selectable lists ───────────────────────────
     local presetList1 = NS.CB_CreateSelectList(presetsSection.bg, "CleanBotPresetList1", 155, 104,
@@ -478,12 +480,13 @@ NS.CleanBot_BuildManageTab = function()
     presetList2.marginLeft = NS.COLUMN_GAP
     NS.CB_AnchorAhead(presetList2, presetList1)
 
-    -- Re-anchor Invite Bot so its left edge aligns with presetList2 rather than
-    -- sitting offset from invitePresetBtn. Pin BOTTOMLEFT → presetList2 TOPLEFT
-    -- with the combined facing margins as the gap (mirror of CB_AnchorBelow).
-    inviteBotBtn:ClearAllPoints()
-    inviteBotBtn:SetPoint("BOTTOMLEFT", presetList2, "TOPLEFT",
-        0, (presetList2.marginTop or 0) + (inviteBotBtn.marginBottom or 0))
+    -- Invite Bot's left edge aligns with presetList2; gap = the combined facing margins
+    -- (mirror of CB_AnchorBelow). Closure-recorded so layout changes re-apply it.
+    NS.CB_Anchor(inviteBotBtn, function()
+        inviteBotBtn:ClearAllPoints()
+        inviteBotBtn:SetPoint("BOTTOMLEFT", presetList2, "TOPLEFT",
+            0, (presetList2.marginTop or 0) + (inviteBotBtn.marginBottom or 0))
+    end)
 
     -- ── Col-1 buttons (below presetList1) ─────────────────
     local addPresetBtn = NS.CB_CreateButton(presetsSection.bg, "CleanBotAddPresetBtn",

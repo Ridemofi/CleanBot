@@ -519,6 +519,12 @@ eventFrame:SetScript("OnEvent", function(_, event)
             built = true
             CB_BuildStrip()
             CB_CreateMerchantOverlays()
+            -- Buyback tab clicks and page flips call MerchantFrame_Update straight from
+            -- XML with NO event, so the overlay/banner gates never re-evaluate on them
+            -- without this hook (overlays would sit over buyback items and eat clicks).
+            hooksecurefunc("MerchantFrame_Update", function()
+                if merchantOpen then CB_RefreshOverlays() end
+            end)
         end
         return
     end
