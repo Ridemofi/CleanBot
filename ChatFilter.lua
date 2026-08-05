@@ -26,26 +26,46 @@ local function suppressibleParty(name)
     return (NS.CB_FindPartyUnit and NS.CB_FindPartyUnit(name) ~= nil) or false
 end
 
+-- Filters run once PER CHAT WINDOW displaying the event, so a filter that consumes a
+-- tag must hand every window the same verdict for the same line — otherwise window 1
+-- eats the tag and window 2 shows the echo. Each consuming filter remembers its last
+-- (line key, frame time) decision and replays it for repeat invocations in the same
+-- frame (all windows process a line at one GetTime()).
+---@param cache  table          Per-filter { key=, at=, verdict= } memo.
+---@param key    string         Identity of the line being filtered.
+---@param decide fun():boolean  Evaluates (and consumes) on the first invocation only.
+---@return boolean
+local function replayable(cache, key, decide)
+    local now = GetTime()
+    if cache.key == key and cache.at == now then return cache.verdict end
+    cache.key, cache.at, cache.verdict = key, now, decide()
+    return cache.verdict
+end
+
 -- Outgoing: hide only the command whispers CleanBot itself sent, so a command you type by hand
 -- to a bot stays visible. Bridge.lua tags each addon-sent whisper in NS.selfWhispers (keyed by
 -- recipient+text); we consume one matching tag per INFORM. No tag → it's a manual whisper, show
 -- it. Tags older than SELF_WHISPER_TTL are purged: a failed send fires no INFORM, so its tag
 -- must not linger and wrongly hide a later identical manual command.
 local SELF_WHISPER_TTL = 3
+local informSeen = {}
 local function filterWhisperInform(_, _, msg, recipient)
     if not enabled() or not suppressibleParty(recipient) then return false end
-    local store = NS.selfWhispers
-    local list  = store and store[strlower(recipient or "") .. "\0" .. (msg or "")]
-    if not list then return false end
-    local now = GetTime()
-    while list[1] and (now - list[1]) > SELF_WHISPER_TTL do
-        table.remove(list, 1)   -- drop stale tags (sends that never produced an INFORM)
-    end
-    if list[1] then
-        table.remove(list, 1)   -- consume this addon-sent whisper
-        return true
-    end
-    return false
+    local key = strlower(recipient or "") .. "\0" .. (msg or "")
+    return replayable(informSeen, key, function()
+        local store = NS.selfWhispers
+        local list  = store and store[key]
+        if not list then return false end
+        local now = GetTime()
+        while list[1] and (now - list[1]) > SELF_WHISPER_TTL do
+            table.remove(list, 1)   -- drop stale tags (sends that never produced an INFORM)
+        end
+        if list[1] then
+            table.remove(list, 1)   -- consume this addon-sent whisper
+            return true
+        end
+        return false
+    end)
 end
 
 -- Outgoing broadcast: hide the player's own party/raid echo of a command CleanBot broadcast (the
@@ -54,20 +74,23 @@ end
 -- leave a tag that hides a later identical line; the sender check keeps another member's identical
 -- message visible. The overhear listener still sees the line (filters touch display only, not events).
 local SELF_GROUP_TTL = 3
+local groupSeen = {}
 local function filterGroup(_, _, msg, sender)
     if not enabled() then return false end
     if not (NS.CB_IsSelfSender and NS.CB_IsSelfSender(sender, UnitName("player"))) then return false end
-    local list = NS.selfGroupMessages and NS.selfGroupMessages[msg or ""]
-    if not list then return false end
-    local now = GetTime()
-    while list[1] and (now - list[1]) > SELF_GROUP_TTL do
-        table.remove(list, 1)
-    end
-    if list[1] then
-        table.remove(list, 1)
-        return true
-    end
-    return false
+    return replayable(groupSeen, (msg or "") .. "\0" .. (sender or ""), function()
+        local list = NS.selfGroupMessages and NS.selfGroupMessages[msg or ""]
+        if not list then return false end
+        local now = GetTime()
+        while list[1] and (now - list[1]) > SELF_GROUP_TTL do
+            table.remove(list, 1)
+        end
+        if list[1] then
+            table.remove(list, 1)
+            return true
+        end
+        return false
+    end)
 end
 
 -- Incoming: hide a bot's reply while its command-reply window is open (see CB_MarkExpectReply

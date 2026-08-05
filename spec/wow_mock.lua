@@ -23,18 +23,25 @@ _G.Mock = {
     now      = 0,    -- value returned by GetTime()
     raid     = 0,    -- GetNumRaidMembers()
     party    = 0,    -- GetNumPartyMembers()
+    roster     = {},  -- [unit] = name, for UnitName lookups (e.g. roster.party1 = "Botone")
+    playerUnit = nil, -- group unit that IS the player (e.g. "raid2"), for UnitIsUnit
+    chatFilters = {}, -- captured ChatFrame_AddMessageEventFilter fns → [event] = { fn, ... }
+    items       = {}, -- GetItemInfo cache → [itemId] = canonical link
 }
 
 --- Clears recorded sends + the clock. Call from before_each. Leaves captured frame handlers
---- intact (frames are created once at file load, not per test).
+--- and chat filters intact (both are registered once at file load, not per test).
 function Mock.reset()
-    Mock.whispers = {}
-    Mock.chat     = {}
-    Mock.addon    = {}
-    Mock.timers   = {}
-    Mock.now      = 0
-    Mock.raid     = 0
-    Mock.party    = 0
+    Mock.whispers   = {}
+    Mock.chat       = {}
+    Mock.addon      = {}
+    Mock.timers     = {}
+    Mock.now        = 0
+    Mock.raid       = 0
+    Mock.party      = 0
+    Mock.roster     = {}
+    Mock.playerUnit = nil
+    Mock.items      = {}
 end
 
 --- Advances the clock by dt, fires every captured OnUpdate handler with (frame, dt), then
@@ -84,7 +91,34 @@ _G.OKAY               = _G.OKAY or "Okay"
 _G.GetTime            = function() return Mock.now end
 _G.GetNumRaidMembers  = function() return Mock.raid end
 _G.GetNumPartyMembers = function() return Mock.party end
-_G.UnitName           = function() return "TestPlayer" end
+
+-- The player is "TestPlayer"; group units resolve through Mock.roster.
+_G.UnitName = function(unit)
+    if unit == nil or unit == "player" then return "TestPlayer" end
+    return Mock.roster[unit]
+end
+-- Unit identity: "player" and Mock.playerUnit are the same character.
+local function canonUnit(u)
+    if u == "player" or (Mock.playerUnit and u == Mock.playerUnit) then return "player" end
+    return u
+end
+_G.UnitIsUnit = function(a, b) return canonUnit(a) == canonUnit(b) end
+
+-- Item cache: only ids seeded into Mock.items resolve (others = cache miss → nils).
+_G.GetItemInfo = function(itemId)
+    local link = Mock.items[itemId]
+    if not link then return nil end
+    local name = link:match("%[(.-)%]")
+    return name, link
+end
+
+-- Chat-frame display filters register once at file load; specs invoke them via
+-- Mock.chatFilters[event][i](nil, event, ...) to drive the display pipeline.
+_G.ChatFrame_AddMessageEventFilter = function(event, fn)
+    local list = Mock.chatFilters[event]
+    if not list then list = {}; Mock.chatFilters[event] = list end
+    list[#list + 1] = fn
+end
 
 _G.SendChatMessage = function(text, channel, _, target)
     if channel == "WHISPER" then
@@ -99,6 +133,7 @@ end
 
 -- WoW string helpers — aliases of the standard string library used throughout the addon.
 _G.strmatch = string.match
+_G.gmatch   = string.gmatch
 _G.strfind  = string.find
 _G.strsub   = string.sub
 _G.strlower = string.lower
@@ -106,17 +141,13 @@ _G.strupper = string.upper
 _G.strrep   = string.rep
 _G.strtrim  = function(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
 
--- NS helpers normally provided by CleanBot.lua (which we don't load in unit specs). Stubbed so
--- Bridge.lua's runtime paths don't nil-error; CB_After records its callback rather than firing.
-_G.CleanBotNS.CB_Print = _G.CleanBotNS.CB_Print or function() end
--- CB_After schedules onto Mock.timers; Mock.tick fires due callbacks (like the real shared timer).
-_G.CleanBotNS.CB_After = function(delay, fn)
-    Mock.timers[#Mock.timers + 1] = { elapsed = 0, delay = delay, fn = fn }
-end
--- Faithful copy of CleanBot.lua's plain-separator splitter (used by Bridge.lua to parse
--- "~"-delimited MBOT packets). Returns (before, after-or-"").
-_G.CleanBotNS.CB_SplitOnce = _G.CleanBotNS.CB_SplitOnce or function(str, sep)
-    local i = string.find(str, sep, 1, true)
-    if i then return string.sub(str, 1, i - 1), string.sub(str, i + 1) end
-    return str, ""
+-- Test-environment overrides installed AFTER run.lua dofiles the real CleanBot.lua
+-- (which provides CB_SplitOnce, the group helpers, etc. — tested directly in core_spec).
+-- CB_Print is muted, and CB_After is redirected onto Mock.timers so Mock.reset()
+-- can drop pending callbacks between tests (the real shared timer can't be flushed).
+function Mock.silenceCore()
+    _G.CleanBotNS.CB_Print = function() end
+    _G.CleanBotNS.CB_After = function(delay, fn)
+        Mock.timers[#Mock.timers + 1] = { elapsed = 0, delay = delay, fn = fn }
+    end
 end

@@ -21,13 +21,16 @@ client) installs via `winget install DEVCOM.LuaJIT`:
 
 ## Layout
 
-- `wow_mock.lua` — minimal WoW API mock (frame stub, string aliases, namespace seed).
-  Extend it as new specs need more of the API.
+- `wow_mock.lua` — minimal WoW API mock (frame stub, string aliases, roster/filter/item
+  cache controls). Extend it as new specs need more of the API.
 - `framework.lua` — tiny [busted](https://lunarmodules.github.io/busted/)-style harness
   (`describe` / `it` / `assert.*`). Specs are written busted-style so they can migrate to
   real busted later with no changes.
-- `run.lua` — entry point; loads the mock, harness, and each spec. **Register new spec files
-  here.**
+- `run.lua` — entry point; loads the mock, then the **real `CleanBot.lua`** (so core helpers
+  like `CB_SplitOnce` and the group iterators are the actual code, not copies), then the
+  harness and each spec. **Register new spec files here.** `Mock.silenceCore()` re-stubs
+  `CB_Print`/`CB_After` after the core loads so output stays quiet and timers stay drivable
+  via `Mock.tick`.
 - `*_spec.lua` — the tests. A spec `dofile`s the addon file under test, then asserts.
 
 ## CI
