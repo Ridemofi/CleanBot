@@ -948,11 +948,14 @@ local function CB_BuildColumnGroups(col, groups, cmd, slot, tag, startGi, regist
                     end
                     info.func            = function()
                         UIDropDownMenu_SetText(self, group.noneLabel)
-                        -- Re-add the bot's detected-spec DPS rotation (preserve intent),
-                        -- falling back to the class canonical token if its spec isn't known.
+                        -- Re-add the bot's detected-spec DPS rotation (preserve intent);
+                        -- a tank/heal-specced bot gets its off-spec rotation instead
+                        -- (its spec strategy IS the rotation, so it must be replaced);
+                        -- last resort is the class canonical token.
                         local addCmdFn = function(m)
                             local e = CleanBot_PartyBots[m.key]
                             return (NS.CB_DetectedDpsToken and NS.CB_DetectedDpsToken(e))
+                                or (NS.CB_OffspecDpsToken and NS.CB_OffspecDpsToken(e))
                                 or (group.dpsCmdByClass and group.dpsCmdByClass[m.class])
                         end
                         CB_ApplyExclusiveSelection(strategies, nil, cmd, slot, getSource, addCmdFn)

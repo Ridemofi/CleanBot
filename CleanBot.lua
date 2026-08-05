@@ -194,6 +194,22 @@ NS.CB_SplitOnce = function(str, sep)
     return str, ""
 end
 
+-- GetItemInfo's 6th return (itemType) is LOCALIZED, so it must be compared against
+-- localized class names, not English literals. GetAuctionItemClasses returns those
+-- names in fixed order (Weapon, Armor, Container, Consumable, Glyph, Trade Goods,
+-- Projectile, Quiver, Recipe, Gem, Miscellaneous, Quest). Resolved lazily; English
+-- fallback covers a client where the auction data isn't available yet.
+local itemTypeTokens
+---@param key string  "consumable" | "quest".
+---@return string     The client-locale item class name.
+NS.CB_ItemTypeToken = function(key)
+    if not itemTypeTokens then
+        local _, _, _, consumable, _, _, _, _, _, _, _, quest = GetAuctionItemClasses()
+        itemTypeTokens = { consumable = consumable or "Consumable", quest = quest or "Quest" }
+    end
+    return itemTypeTokens[key]
+end
+
 -- ============================================================
 -- Config + bot detection cache
 -- ============================================================
@@ -256,9 +272,9 @@ NS.MARGIN_DEFAULTS = {
 }
 -- Canonical defaults for theme settings — read by the Defaults button.
 -- accentColor is replaced with the skin-appropriate default at PLAYER_LOGIN (after
--- ElvUI detection): black opaque for ElvUI (matches its solid border style), white
--- opaque for plain Blizzard UI. NS.accentColor is seeded from the same value there,
--- so a fresh install looks exactly like what the Defaults button applies.
+-- ElvUI detection): black opaque for ElvUI (matches its solid border style), alpha 0
+-- for plain Blizzard UI (no visible border tint). NS.accentColor is seeded from the
+-- same value there, so a fresh install looks exactly like what Defaults applies.
 NS.THEME_DEFAULTS = {
     scale        = 100,
     transparency = 90,
@@ -481,7 +497,10 @@ initFrame:SetScript("OnEvent", function(self, event)
         -- This must happen before SavedVars are applied so that the Defaults button in
         -- Settings shows the correct value, and so that NS.accentColor starts at the
         -- right value when no saved data exists yet.
-        local defaultAccentColor  = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 1 }
+        -- ElvUI: black opaque (matches its solid 1px border). Plain Blizzard: white at
+        -- alpha 0 — no border tint by default; the white hue is just the swatch's
+        -- starting point if the user raises the alpha.
+        local defaultAccentColor  = NS.ElvUI_S and { r = 0.0, g = 0.0, b = 0.0, a = 1 } or { r = 1.0, g = 1.0, b = 1.0, a = 0 }
         local defaultTransparency = NS.ElvUI_S and 75 or 90
         NS.THEME_DEFAULTS.accentColor   = defaultAccentColor
         NS.THEME_DEFAULTS.transparency  = defaultTransparency

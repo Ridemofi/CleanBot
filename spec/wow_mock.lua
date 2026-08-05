@@ -112,6 +112,12 @@ _G.GetItemInfo = function(itemId)
     return name, link
 end
 
+-- Localized item class names, English (the 3.3.5a fixed order; Consumable 4th, Quest 12th).
+_G.GetAuctionItemClasses = function()
+    return "Weapon", "Armor", "Container", "Consumable", "Glyph", "Trade Goods",
+           "Projectile", "Quiver", "Recipe", "Gem", "Miscellaneous", "Quest"
+end
+
 -- Chat-frame display filters register once at file load; specs invoke them via
 -- Mock.chatFilters[event][i](nil, event, ...) to drive the display pipeline.
 _G.ChatFrame_AddMessageEventFilter = function(event, fn)

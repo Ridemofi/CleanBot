@@ -617,7 +617,7 @@ NS.CLASS_STRATEGIES = {
 --
 -- Only classes whose Role dropdown offers Tank or Heal appear here: only they can leave DPS
 -- and lose the rotation (pure-DPS classes never set a non-DPS role). Tank/heal spec fields are
--- intentionally absent — picking DPS on them falls back to the Role group's dpsCmdByClass.
+-- intentionally absent — picking DPS on them falls back to SPEC_OFFSPEC_DPS_TOKEN below.
 -- ============================================================
 NS.SPEC_DPS_TOKEN = {
     WARRIOR     = { armsPvE = "arms", armsPvP = "arms", fury = "fury", furyPvP = "fury" },
@@ -638,6 +638,37 @@ NS.SPEC_DPS_TOKEN = {
 NS.CB_DetectedDpsToken = function(entry)
     if not (entry and entry.class) then return nil end
     local map = NS.SPEC_DPS_TOKEN[entry.class]
+    local src = entry.classData and entry.classData.combat
+    if not (map and src) then return nil end
+    for field, token in pairs(map) do
+        if src[field] == true then return token end
+    end
+    return nil
+end
+
+-- ============================================================
+-- Off-spec DPS rotation fallbacks
+--
+-- For a bot whose DETECTED spec is tank/heal, the spec strategy IS its rotation
+-- server-side (AiFactory: prot="tank", blood="blood", bear/"resto"), so picking the
+-- DPS Role with no replacement token would leave the bot with no rotation at all.
+-- These are the off-spec rotations to send instead — the bot fights suboptimally
+-- (wrong talents for the rotation) but it fights.
+-- ============================================================
+NS.SPEC_OFFSPEC_DPS_TOKEN = {
+    WARRIOR     = { protPvE = "arms", protPvP = "arms" },
+    DEATHKNIGHT = { bloodPve = "frost", doubleAuraBloodPve = "frost", bloodPvp = "frost" },
+    SHAMAN      = { restoPve = "ele", restoPvp = "ele" },
+    DRUID       = { bearPve = "cat", restoPve = "balance", restoPvp = "balance" },
+}
+
+-- The off-spec DPS rotation token for a bot detected in a tank/heal spec, or nil when
+-- the spec is unknown or already a damage spec (CB_DetectedDpsToken covers those).
+---@param entry table?  CleanBot_PartyBots[key].
+---@return string?       Rotation token to send (e.g. "arms", "cat"), or nil.
+NS.CB_OffspecDpsToken = function(entry)
+    if not (entry and entry.class) then return nil end
+    local map = NS.SPEC_OFFSPEC_DPS_TOKEN[entry.class]
     local src = entry.classData and entry.classData.combat
     if not (map and src) then return nil end
     for field, token in pairs(map) do

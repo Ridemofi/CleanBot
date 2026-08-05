@@ -128,6 +128,20 @@ describe("Detected-spec DPS rotation (Role 'DPS' restore)", function()
         assert.equals("unholy", NS.CB_DetectedDpsToken({ class = "DEATHKNIGHT", classData = { combat = { unholyPvp = true } } }))
     end)
 
+    it("falls back to an off-spec rotation for a tank/heal-specced bot (CB_OffspecDpsToken)", function()
+        -- Their spec strategy IS the rotation server-side (AiFactory), so the DPS role
+        -- pick must send a replacement token or the bot stops fighting.
+        assert.equals("arms",    NS.CB_OffspecDpsToken({ class = "WARRIOR",     classData = { combat = { protPvE = true } } }))
+        assert.equals("frost",   NS.CB_OffspecDpsToken({ class = "DEATHKNIGHT", classData = { combat = { doubleAuraBloodPve = true } } }))
+        assert.equals("cat",     NS.CB_OffspecDpsToken({ class = "DRUID",       classData = { combat = { bearPve = true } } }))
+        assert.equals("balance", NS.CB_OffspecDpsToken({ class = "DRUID",       classData = { combat = { restoPve = true } } }))
+        assert.equals("ele",     NS.CB_OffspecDpsToken({ class = "SHAMAN",      classData = { combat = { restoPve = true } } }))
+        -- Damage specs and unknowns stay nil (CB_DetectedDpsToken owns those).
+        assert.is_nil(NS.CB_OffspecDpsToken({ class = "WARRIOR", classData = { combat = { fury = true } } }))
+        assert.is_nil(NS.CB_OffspecDpsToken({ class = "MAGE",    classData = { combat = {} } }))
+        assert.is_nil(NS.CB_OffspecDpsToken(nil))
+    end)
+
     it("returns nil for a tank/heal spec, an unmapped class, or missing data", function()
         assert.is_nil(NS.CB_DetectedDpsToken({ class = "PALADIN", classData = { combat = { protPve = true } } }))  -- tank spec
         assert.is_nil(NS.CB_DetectedDpsToken({ class = "DRUID",   classData = { combat = { restoPve = true } } })) -- heal spec

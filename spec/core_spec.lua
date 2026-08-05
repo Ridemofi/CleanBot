@@ -98,6 +98,15 @@ describe("Group helpers (party vs raid)", function()
     end)
 end)
 
+describe("CB_ItemTypeToken", function()
+    it("resolves the client-locale class names from GetAuctionItemClasses positions", function()
+        -- GetItemInfo's itemType return is localized; comparisons must use these
+        -- tokens (4th = Consumable, 12th = Quest), never English literals.
+        assert.equals("Consumable", NS.CB_ItemTypeToken("consumable"))
+        assert.equals("Quest", NS.CB_ItemTypeToken("quest"))
+    end)
+end)
+
 describe("CB_CleanItemLink", function()
     before_each(function() Mock.reset() end)
 

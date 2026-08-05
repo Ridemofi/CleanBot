@@ -148,8 +148,8 @@ local function CB_ShowInvMenu(cell, key)
     local _, _, _, _, _, itemType, _, _, equipLoc = GetItemInfo(cell.itemLink)
     equipLoc = equipLoc or ""
     local isEquipment  = equipLoc ~= ""
-    local isConsumable = itemType == "Consumable"
-    local isQuest      = itemType == "Quest"
+    local isConsumable = itemType == NS.CB_ItemTypeToken("consumable")
+    local isQuest      = itemType == NS.CB_ItemTypeToken("quest")
 
     UIDropDownMenu_Initialize(invMenu, function()
         local info = UIDropDownMenu_CreateInfo()

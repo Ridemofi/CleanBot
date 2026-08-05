@@ -199,6 +199,76 @@ local function CB_BuildQuestNameCache()
     end
 end
 
+-- ── Async quest-title resolution (bridge path) ───────────────────────────
+-- The bridge's QUESTS_ITEM packet carries no title (see Bridge.lua), and the drop
+-- command needs one, so titles for quests the player doesn't have are read from the
+-- client's quest data cache via a hidden tooltip. SetHyperlink renders the cached
+-- title on line 1 and queries the server for an uncached quest, so a short retry
+-- loop covers the round-trip (same link form the row tooltips already use).
+local scanTip = CreateFrame("GameTooltip", "CleanBotQuestScanTip", nil, "GameTooltipTemplate")
+
+local RESOLVE_RETRY_DELAY = 0.5
+local RESOLVE_MAX_TRIES   = 4
+local resolvingQuests = {}   -- [questID] = { onDone, ... } while a resolve loop runs
+
+---@param questID number
+---@return string|nil  The title from the client's quest cache, or nil if not received yet.
+local function CB_ReadQuestTitle(questID)
+    scanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scanTip:ClearLines()
+    scanTip:SetHyperlink("quest:" .. questID .. ":60")
+    local line  = _G["CleanBotQuestScanTipTextLeft1"]
+    local title = line and line:GetText()
+    scanTip:Hide()
+    if title and title ~= "" then return title end
+    return nil
+end
+
+-- Resolves a quest title into NS.questNameCache (retrying while the server query is
+-- in flight), then calls onDone(title|nil). Concurrent requests for the same quest
+-- coalesce onto one loop.
+---@param questID number?
+---@param onDone  fun(title:string|nil)?
+NS.CB_ResolveQuestName = function(questID, onDone)
+    if not questID then
+        if onDone then onDone(nil) end
+        return
+    end
+    local cached = NS.questNameCache[questID]
+    if cached then
+        if onDone then onDone(cached) end
+        return
+    end
+    local waiters = resolvingQuests[questID]
+    if waiters then
+        waiters[#waiters + 1] = onDone
+        return
+    end
+    waiters = { onDone }
+    resolvingQuests[questID] = waiters
+
+    local tries = 0
+    local function finish(title)
+        resolvingQuests[questID] = nil
+        if title then NS.questNameCache[questID] = title end
+        for _, cb in ipairs(waiters) do
+            if cb then cb(title) end
+        end
+    end
+    local function attempt()
+        tries = tries + 1
+        local title = CB_ReadQuestTitle(questID)
+        if title then
+            finish(title)
+        elseif tries < RESOLVE_MAX_TRIES then
+            NS.CB_After(RESOLVE_RETRY_DELAY, attempt)
+        else
+            finish(nil)
+        end
+    end
+    attempt()
+end
+
 -- ── Render one collapsible status group into the scroll child ────────────
 -- Creates a header button (expand/collapse) and a row per quest when expanded.
 -- Appends all created frames to framePool so CB_RenderQuests can hide them
@@ -425,9 +495,19 @@ NS.CB_RenderQuestDetail = function(key, questID)
         or (questID and NS.questNameCache[questID])
 
     if f.abandonBtn then
-        -- No resolvable name (bridge path + quest the player doesn't have): the drop
-        -- command cannot address the quest, so disable rather than no-op on click.
-        if not abandonName then f.abandonBtn:Disable() else f.abandonBtn:Enable() end
+        -- No resolvable name yet (bridge path + quest the player doesn't have): the drop
+        -- command cannot address the quest, so disable and resolve the title from the
+        -- client's quest cache — the re-render re-wires this button once it lands.
+        if not abandonName then
+            f.abandonBtn:Disable()
+            NS.CB_ResolveQuestName(questID, function(title)
+                if title and f.selectedQuestID == questID and f:IsShown() then
+                    NS.CB_RenderQuestDetail(key, questID)
+                end
+            end)
+        else
+            f.abandonBtn:Enable()
+        end
         f.abandonBtn:SetScript("OnClick", function()
             if not entry or not abandonName then return end
             NS.CB_SendBotCommand(entry.name, "drop " .. abandonName)

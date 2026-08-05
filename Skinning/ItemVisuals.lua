@@ -144,7 +144,7 @@ NS.CB_RefreshRarityOverlays = function()
         if btn.itemLink then
             local _, _, q, _, _, itemType = GetItemInfo(btn.itemLink)
             quality = q
-            if itemType == "Quest" then override = QUEST_BORDER_COLOR end
+            if itemType == NS.CB_ItemTypeToken("quest") then override = QUEST_BORDER_COLOR end
         end
         NS.CB_SetRarityOverlay(btn, quality, override)
     end
@@ -209,7 +209,7 @@ NS.CB_ApplyItemVisuals = function(btn, link)
     end
     local _, _, quality, _, _, itemType = GetItemInfo(link)
     local glowOverride
-    if itemType == "Quest" then
+    if itemType == NS.CB_ItemTypeToken("quest") then
         CB_ApplyBorderColor(btn, unpack(QUEST_BORDER_COLOR))
         glowOverride = QUEST_BORDER_COLOR
     elseif quality then

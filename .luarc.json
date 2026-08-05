@@ -34,6 +34,7 @@
       "CloseDropDownMenus",
       "ColorPickerFrame",
       "FauxScrollFrame_GetOffset",
+      "GetAuctionItemClasses",
       "FauxScrollFrame_OnVerticalScroll",
       "FauxScrollFrame_Update",
       "GetMouseFocus",
