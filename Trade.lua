@@ -133,6 +133,9 @@ eventFrame:SetScript("OnEvent", function(self, event)
 
         activeTradeKey = key
         CB_SetTradeOverlaysVisible(true)
+        if NS.CB_ArmInventoryBurst then
+            NS.CB_ArmInventoryBurst(entry.name)
+        end
         NS.CB_FetchInventory(key, entry.name)
         NS.CB_ShowInventory(key, entry.name, TradeFrame)
 

@@ -100,6 +100,54 @@ describe("ChatFilter incoming whisper (reply window)", function()
     end)
 end)
 
+describe("ChatFilter trade inventory burst", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots     = { bot = { name = "Bot" } }
+        NS.hideBotChatter      = true
+        NS.botReplyWindow      = {}
+        NS.botInInventoryBurst = {}
+    end)
+
+    it("detects '=== Inventory ===' and hides inventory lines across 1.5s delays", function()
+        assert.is_true(filter("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot"))
+
+        Mock.now = 1.5
+        assert.is_true(filter("CHAT_MSG_WHISPER", "--- other ---", "Bot"))
+
+        Mock.now = 3.0
+        assert.is_true(filter("CHAT_MSG_WHISPER", "|cffffffff|Hitem:117:0:0:0:0:0:0:0:0|h[Tough Jerky]|h|r x5", "Bot"))
+
+        Mock.now = 4.0
+        assert.is_true(filter("CHAT_MSG_WHISPER", "Discount up to: 10s 50c", "Bot"))
+
+        Mock.now = 4.1
+        assert.is_false(filter("CHAT_MSG_WHISPER", "Hello there!", "Bot"))
+    end)
+
+    it("supports pre-arming via CB_ArmInventoryBurst before header arrives", function()
+        NS.CB_ArmInventoryBurst("Bot")
+        Mock.now = 1.0
+        assert.is_true(filter("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot"))
+        Mock.now = 2.0
+        assert.is_true(filter("CHAT_MSG_WHISPER", "--- consumable ---", "Bot"))
+    end)
+
+    it("does not swallow or slide on unrelated whispers during inventory burst", function()
+        assert.is_true(filter("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot"))
+        Mock.now = 0.5
+        assert.is_false(filter("CHAT_MSG_WHISPER", "I need more mana!", "Bot"))
+    end)
+
+    it("replays verdict to a second chat window in the same frame", function()
+        assert.is_true(filter("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot"))
+        assert.is_true(filter("CHAT_MSG_WHISPER", "=== Inventory ===", "Bot"))
+        Mock.now = 0.5
+        assert.is_true(filter("CHAT_MSG_WHISPER", "Discount up to: 5s", "Bot"))
+        assert.is_true(filter("CHAT_MSG_WHISPER", "Discount up to: 5s", "Bot"))
+    end)
+end)
+
 describe("ChatFilter group echo", function()
     before_each(function()
         Mock.reset()

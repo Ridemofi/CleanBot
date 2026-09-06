@@ -319,8 +319,12 @@ NS.CB_CreateEquipSlots = function(slot, model)
         end
     end)
     NS.CB_SetTooltip(bagBtn, "Open Inventory")
+    slot.bagBtn = bagBtn
 
     NS.CB_CreateQuestButton(slot, model, slotSize)
+    if NS.CB_CreateSpellbookButton then
+        NS.CB_CreateSpellbookButton(slot, model, slotSize)
+    end
 
     -- ── XP bar — spans the bottom button row, touching it ──────────
     -- Anchored from the bag button's left edge to the quest button's right edge,

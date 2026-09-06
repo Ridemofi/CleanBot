@@ -470,12 +470,16 @@ local function CB_BuildStrip()
     -- filter hides. We still reconcile each tracked bot so any open bag windows refresh their lists.
     local btnW = PANEL_W - (cogPanel.paddingLeft or 8) - (cogPanel.paddingRight or 8)
     local sellAllBtn = NS.CB_CreateButton(cogPanel, "CleanBotVendorSellAllBtn", "Sell Trash", btnW, 22, function()
-        NS.CB_SendGroupCommand("s gray")
-        if NS.CB_ForEachGroupMember and NS.CB_ScheduleReconcile then
-            NS.CB_ForEachGroupMember(function(_, name)
-                local key = name and strlower(name)
-                if key and CleanBot_PartyBots[key] then NS.CB_ScheduleReconcile(key, name) end
-            end)
+        if NS.CB_BridgeGroupBulkSell then
+            NS.CB_BridgeGroupBulkSell()
+        else
+            NS.CB_SendGroupCommand("s gray")
+            if NS.CB_ForEachGroupMember and NS.CB_ScheduleReconcile then
+                NS.CB_ForEachGroupMember(function(_, name)
+                    local key = name and strlower(name)
+                    if key and CleanBot_PartyBots[key] then NS.CB_ScheduleReconcile(key, name) end
+                end)
+            end
         end
     end)
     NS.CB_AnchorBelow(sellAllBtn, enableCB)

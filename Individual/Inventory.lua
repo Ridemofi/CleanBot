@@ -118,24 +118,24 @@ NS.CB_ParseItemLine = ParseItemLine   -- exposed for CleanBot.lua whisper handle
 ---@param key     string  Bot name-key.
 ---@param botName string  Bot's display name (command target).
 ---@param link    string  Item link to equip.
-local function CB_EquipItem(key, botName, link)
-    NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
-    NS.CB_After(1.5, function()
-        NS.CB_FetchInventory(key, botName)
-        -- Delayed equip-slot re-inspect: the immediate UNIT_INVENTORY_CHANGED read
-        -- has a stale item link (texture fresh, link lagging), so the staleness
-        -- guard in CB_RefreshEquipSlots skips it. By now the link has caught up, so
-        -- this fresh read lands the correct icon + border — and covers the
-        -- context-menu Equip path, which has no optimistic paint to hold in the gap.
-        if NS.CB_QueueEquipRefresh then
-            for _, slot in ipairs(NS.tabList or {}) do
-                if slot.key == key and slot.unit and UnitExists(slot.unit) then
-                    NS.CB_QueueEquipRefresh({{ key = key, unit = slot.unit }})
-                    break
+---@param cell    table?  Optional inventory cell (carries bag/slot if exact coordinates are available).
+local function CB_EquipItem(key, botName, link, cell)
+    if NS.CB_BridgeEquipItem then
+        NS.CB_BridgeEquipItem(key, botName, link, cell)
+    else
+        NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
+        NS.CB_After(1.5, function()
+            NS.CB_FetchInventory(key, botName)
+            if NS.CB_QueueEquipRefresh then
+                for _, slot in ipairs(NS.tabList or {}) do
+                    if slot.key == key and slot.unit and UnitExists(slot.unit) then
+                        NS.CB_QueueEquipRefresh({{ key = key, unit = slot.unit }})
+                        break
+                    end
                 end
             end
-        end
-    end)
+        end)
+    end
 end
 
 -- ── Inventory cell right-click context menu ──────────────────────────────
@@ -160,7 +160,7 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                CB_EquipItem(key, entry.name, cell.itemLink)
+                CB_EquipItem(key, entry.name, cell.itemLink, cell)
             end
             UIDropDownMenu_AddButton(info)
         end
@@ -170,20 +170,29 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
+                if NS.CB_BridgeUseItem then
+                    NS.CB_BridgeUseItem(key, entry.name, cell.itemLink, cell)
+                else
+                    NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
+                    NS.CB_ScheduleReconcile(key, entry.name)
+                end
                 -- Optimistic update: decrement stack or clear cell immediately.
                 -- IsShown gate: a hidden countText still holds the previous occupant's number.
                 local curCount = cell.countText:IsShown() and tonumber(cell.countText:GetText()) or 1
                 if curCount > 1 then
                     cell.countText:SetText(curCount - 1)
+                    cell.count = curCount - 1
                 else
                     cell.icon:Hide()
                     cell.countText:Hide()
                     cell.itemLink = nil
+                    cell.bag = nil
+                    cell.slot = nil
+                    cell.itemId = nil
+                    cell.count = nil
                     NS.CB_ClearQualityBorder(cell)
                     NS.CB_SetRarityOverlay(cell, nil)
                 end
-                NS.CB_ScheduleReconcile(key, entry.name)
             end
             UIDropDownMenu_AddButton(info)
         end
@@ -213,14 +222,23 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                NS.CB_SendBotCommand(entry.name, "guild bank " .. NS.CB_CleanItemLink(cell.itemLink))
+                local bridgeSent = NS.CB_BridgeDepositItem and NS.CB_BridgeDepositItem(entry.name, "GBANK_DEPOSIT", cell)
+                if not bridgeSent then
+                    NS.CB_SendBotCommand(entry.name, "guild bank " .. NS.CB_CleanItemLink(cell.itemLink))
+                end
                 -- Optimistic clear (mirrors Use/Sell); reconcile restores the cell on failure.
                 cell.icon:Hide()
                 cell.countText:Hide()
                 cell.itemLink = nil
+                cell.bag = nil
+                cell.slot = nil
+                cell.itemId = nil
+                cell.count = nil
                 NS.CB_ClearQualityBorder(cell)
                 NS.CB_SetRarityOverlay(cell, nil)
-                NS.CB_ScheduleReconcile(key, entry.name)
+                if not bridgeSent then
+                    NS.CB_ScheduleReconcile(key, entry.name)
+                end
             end
             UIDropDownMenu_AddButton(info)
         end
@@ -230,13 +248,21 @@ local function CB_ShowInvMenu(cell, key)
         info.func = function ()
             local entry = CleanBot_PartyBots[key]
             if not entry then return end
-            NS.CB_SendBotCommand(entry.name, "destroy " .. NS.CB_CleanItemLink(cell.itemLink))
+            if NS.CB_BridgeDestroyItem then
+                NS.CB_BridgeDestroyItem(key, entry.name, cell.itemLink, cell)
+            else
+                NS.CB_SendBotCommand(entry.name, "destroy " .. NS.CB_CleanItemLink(cell.itemLink))
+                NS.CB_ScheduleReconcile(key, entry.name)
+            end
             cell.icon:Hide()
             cell.countText:Hide()
             cell.itemLink = nil
+            cell.bag = nil
+            cell.slot = nil
+            cell.itemId = nil
+            cell.count = nil
             NS.CB_ClearQualityBorder(cell)
             NS.CB_SetRarityOverlay(cell, nil)
-            NS.CB_ScheduleReconcile(key, entry.name)
         end
         UIDropDownMenu_AddButton(info)
 
@@ -406,20 +432,29 @@ end
 ---@param srcCell  table?  The cell the item is moving out of (for the eager update).
 ---@param destCell table?  The exact destination cell (a drag target), if any.
 NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
-    local prefix = (dir == "withdraw") and "bank -" or "bank "
-    local cmd    = prefix .. NS.CB_CleanItemLink(link)
-    NS.CB_EnqueueRequest(key, function()
-        local e = CleanBot_PartyBots[key]
-        if e then e.awaitingBankOp = true; e.bankOpTimeout = 0 end
-        NS.CB_SendBotCommandRaw(botName, cmd)  -- already running from the queue
-    end)
+    local bridgeSent = false
+    if dir == "deposit" and NS.CB_BridgeDepositItem then
+        bridgeSent = NS.CB_BridgeDepositItem(botName, "BANK_DEPOSIT", srcCell)
+    end
+
+    if not bridgeSent then
+        local prefix = (dir == "withdraw") and "bank -" or "bank "
+        local cmd    = prefix .. NS.CB_CleanItemLink(link)
+        NS.CB_EnqueueRequest(key, function()
+            local e = CleanBot_PartyBots[key]
+            if e then e.awaitingBankOp = true; e.bankOpTimeout = 0 end
+            NS.CB_SendBotCommandRaw(botName, cmd)  -- already running from the queue
+        end)
+    end
 
     -- Eager move (immediate, regardless of queue position): withdraw lands in the
     -- inventory grid, deposit in the bank grid.
     local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
     CB_OptimisticMove(srcCell, destFrame, destCell)
 
-    NS.CB_ScheduleReconcile(key, botName)
+    if not bridgeSent then
+        NS.CB_ScheduleReconcile(key, botName)
+    end
 end
 
 -- Shown when a bank list/deposit/withdraw runs without a banker NPC near the bot
@@ -542,12 +577,16 @@ local function CB_StopDrag()
         local entry = CleanBot_PartyBots[NS.dragging.key]
         if entry then
             entry.pendingValidation = { link = NS.dragging.link, expectPresent = false }
-            CB_EquipItem(NS.dragging.key, entry.name, NS.dragging.link)
+            CB_EquipItem(NS.dragging.key, entry.name, NS.dragging.link, src)
         end
         if src then
             src.icon:SetDesaturated(false)
             src.icon:Hide()
             src.itemLink = nil
+            src.bag = nil
+            src.slot = nil
+            src.itemId = nil
+            src.count = nil
             if src.countText then src.countText:Hide() end
             NS.CB_ClearQualityBorder(src)
             NS.CB_SetRarityOverlay(src, nil)
@@ -836,7 +875,12 @@ local function CB_GetGridFrame(kind, key, botName)
     -- Refresh (left of Sort): force an immediate server re-fetch — the escape hatch when a
     -- whisper reply was lost and the list looks stale. Both kinds get it.
     local refreshBtn = makeActionButton(cfg.framePrefix .. "RefreshBtn_" .. key, "Interface\\Icons\\Ability_Hunter_Readiness", "Refresh", function()
-        if kind == "bank" then NS.CB_FetchBank(key, botName) else NS.CB_FetchInventory(key, botName) end
+        if NS.CB_SetInventoryLoading then NS.CB_SetInventoryLoading(f, true) end
+        if kind == "bank" then
+            NS.CB_FetchBank(key, botName, true)
+        else
+            NS.CB_FetchInventory(key, botName, true)
+        end
     end)
     refreshBtn:SetPoint("RIGHT", sortBtn, "LEFT", 0, 0)
 
@@ -849,8 +893,12 @@ local function CB_GetGridFrame(kind, key, botName)
             "Sell All Gray Items (Requires a Nearby Vendor)", function()
                 local e       = CleanBot_PartyBots[key]
                 local bn      = (e and e.name) or key
-                NS.CB_SendBotCommand(bn, "s gray")
-                NS.CB_ScheduleReconcile(key, bn)
+                if NS.CB_BridgeBulkSell then
+                    NS.CB_BridgeBulkSell(key, bn)
+                else
+                    NS.CB_SendBotCommand(bn, "s gray")
+                    NS.CB_ScheduleReconcile(key, bn)
+                end
             end)
         sellBtn:SetPoint("RIGHT", refreshBtn, "LEFT", 0, 0)
 
@@ -923,6 +971,48 @@ local SLOT_ORDER = {
     INVTYPE_RANGED          = 17,  INVTYPE_THROWN = 17,          INVTYPE_RANGEDRIGHT = 17,
     INVTYPE_RELIC           = 18,
 }
+
+-- ── Bank stack expansion ──────────────────────────────────────────────────
+-- Splits consolidated server totals into individual stacks using GetItemInfo itemStackCount.
+---@param rawItems table  Array of item tables ({ link, count, ... }).
+---@return table          New array with stacks split into physical stack limits.
+local function CB_ExpandBankItemStacks(rawItems)
+    if not rawItems then return {} end
+    local expanded = {}
+    local hasPending = false
+
+    for _, item in ipairs(rawItems) do
+        local maxStack = nil
+        if item.link then
+            maxStack = select(8, GetItemInfo(item.link))
+        end
+
+        local total = item.count or 1
+        if not maxStack or maxStack < 1 then
+            hasPending = true
+            local copy = {}
+            for k, v in pairs(item) do copy[k] = v end
+            expanded[#expanded + 1] = copy
+        elseif maxStack > 1 and total > maxStack then
+            local rem = total
+            while rem > 0 do
+                local take = (rem > maxStack) and maxStack or rem
+                local copy = {}
+                for k, v in pairs(item) do copy[k] = v end
+                copy.count = take
+                expanded[#expanded + 1] = copy
+                rem = rem - take
+            end
+        else
+            local copy = {}
+            for k, v in pairs(item) do copy[k] = v end
+            expanded[#expanded + 1] = copy
+        end
+    end
+
+    NS.bankHasPendingItemInfo = hasPending
+    return expanded
+end
 
 ---@param items table  Array of parsed item entries; sorted in place by quality/slot.
 local function CB_SortInventory(items)
@@ -1003,9 +1093,14 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
     for id, cells in pairs(visualById) do
         local newItems = newById[id] or {}
         for i, cell in ipairs(cells) do
-            if newItems[i] then
-                if newItems[i].count > 1 then
-                    cell.countText:SetText(newItems[i].count)
+            local item = newItems[i]
+            if item then
+                cell.bag = item.bag
+                cell.slot = item.slot
+                cell.itemId = item.itemId or tonumber(id)
+                cell.count = item.count
+                if item.count > 1 then
+                    cell.countText:SetText(item.count)
                     cell.countText:Show()
                 else
                     cell.countText:Hide()
@@ -1013,6 +1108,10 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             else
                 cell.icon:Hide()
                 cell.itemLink = nil
+                cell.bag = nil
+                cell.slot = nil
+                cell.itemId = nil
+                cell.count = nil
                 cell.countText:Hide()
                 NS.CB_ClearQualityBorder(cell)
                 NS.CB_SetRarityOverlay(cell, nil)
@@ -1042,6 +1141,10 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.icon:SetTexture(GetItemIcon(strmatch(item.link, "item:(%d+)") or 0))
             cell.icon:Show()
             cell.itemLink = item.link
+            cell.bag = item.bag
+            cell.slot = item.slot
+            cell.itemId = item.itemId or tonumber(strmatch(item.link, "item:(%d+)"))
+            cell.count = item.count
             NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
@@ -1067,6 +1170,10 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
         else
             f.moneyLabel:Hide()
         end
+    end
+
+    if f.loadingOverlay and f.loadingOverlay:IsShown() then
+        f.loadingOverlay:Hide()
     end
 end
 
@@ -1158,20 +1265,33 @@ local function CB_RenderGrid(kind, key, forceFull)
     local f   = cfg.frames[key]
     if not f then return end
 
-    local rawItems  = inv.items    or {}
-    local bagTotal  = inv.bagTotal
-    local bagUsed   = inv.bagUsed
-    local cellCount = bagTotal or #rawItems
+    local rawItems     = inv.items or {}
+    local displayItems = (kind == "bank") and CB_ExpandBankItemStacks(rawItems) or rawItems
+    local bagTotal     = inv.bagTotal
+    local bagUsed      = inv.bagUsed
+    local cellCount    = bagTotal or #displayItems
     -- Reserve a minimum grid (bank only) so a sparse/empty grid still renders rows.
     if cfg.minCells and cellCount < cfg.minCells then cellCount = cfg.minCells end
 
-    -- ── Patch path: frame already rendered with the same cell count ───────
-    if not forceFullRender and f.rendered and #f.cells == cellCount then
-        CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
+    -- Check if the current grid has any visible items
+    local hasVisualItems = false
+    for _, c in ipairs(f.cells) do
+        if c.itemLink then hasVisualItems = true; break end
+    end
+
+    -- On first load with real items into a cold/empty grid, force a full sorted render
+    if not hasVisualItems and #displayItems > 0 then
+        forceFullRender = true
+    end
+
+    -- Preserves existing cell positions while the window is open without auto-sorting.
+    local canPatch = (kind == "bank") and (#f.cells >= cellCount) or (#f.cells == cellCount)
+    if not forceFullRender and f.rendered and canPatch then
+        CB_PatchInventory(f, displayItems, bagTotal, bagUsed, entry)
         return
     end
 
-    local items = CB_SortInventory(rawItems)
+    local items = CB_SortInventory(displayItems)
 
     -- ── Resize frame to fit grid ──────────────────────────────
     local padTop    = NS.ElvUI_S and NS.PADDING.frame.top    or BLIZZ_INV_PAD.top
@@ -1295,6 +1415,10 @@ local function CB_RenderGrid(kind, key, forceFull)
             cell.icon:SetTexture(tex)
             cell.icon:Show()
             cell.itemLink = item.link
+            cell.bag = item.bag
+            cell.slot = item.slot
+            cell.itemId = item.itemId or tonumber(strmatch(item.link, "item:(%d+)"))
+            cell.count = item.count
             NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
@@ -1306,6 +1430,10 @@ local function CB_RenderGrid(kind, key, forceFull)
             cell.icon:Hide()
             cell.countText:Hide()
             cell.itemLink = nil
+            cell.bag = nil
+            cell.slot = nil
+            cell.itemId = nil
+            cell.count = nil
             NS.CB_ApplyItemVisuals(cell, nil)
         end
 
@@ -1383,9 +1511,9 @@ NS.CB_ShowBank = function(key, botName)
     local f    = NS.CB_GetBankFrame(key, botName)
     f:ClearAllPoints()
     f:SetPoint("TOPRIGHT", invF, "TOPLEFT", -4, 0)
-    NS.CB_FetchBank(key, botName)
-    NS.CB_RenderBank(key)
+    NS.CB_RenderBank(key, true)
     f:Show()
+    NS.CB_FetchBank(key, botName)
 end
 
 -- ── Toggle the bank frame open/closed ─────────────────────────────────────
@@ -1399,3 +1527,25 @@ NS.CB_ToggleBank = function(key, botName)
         NS.CB_ShowBank(key, botName)
     end
 end
+
+-- Re-render open bank frames when item info is received for uncached items.
+local itemInfoEventFrame = CreateFrame("Frame")
+itemInfoEventFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+local pendingItemInfoRefresh = false
+itemInfoEventFrame:SetScript("OnEvent", function(self, event, itemId)
+    if not NS.bankHasPendingItemInfo then return end
+    if pendingItemInfoRefresh then return end
+    pendingItemInfoRefresh = true
+    if NS.CB_After then
+        NS.CB_After(0.15, function()
+            pendingItemInfoRefresh = false
+            for key, f in pairs(NS.botBankFrames or {}) do
+                if f and f:IsShown() then
+                    NS.CB_RenderBank(key)
+                end
+            end
+        end)
+    else
+        pendingItemInfoRefresh = false
+    end
+end)

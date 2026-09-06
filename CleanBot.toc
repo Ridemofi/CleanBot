@@ -23,11 +23,13 @@ Individual\ClassData.lua
 Individual\EquipData.lua
 Individual\Inventory.lua
 Individual\Quest.lua
+Individual\Spellbook.lua
 Individual\Equip.lua
 Individual\Model.lua
 Individual\Individual.lua
 Trade.lua
 Merchant.lua
+QuestReward.lua
 Recruiter.lua
 UnitMenu.lua
 ManageTab.lua

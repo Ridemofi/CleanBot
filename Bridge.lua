@@ -87,6 +87,14 @@ end
 NS.lastRawStates = nil
 NS.lastHelloAck  = nil
 NS.bridgeReady   = false
+-- Capability negotiation (CAPS) & state framing
+NS.capabilities          = {}
+NS.stateFramingCapable   = false
+NS.capabilitiesResolved  = false
+NS.capabilityBatchActive = false
+NS.stateRequests         = {}
+NS.stateActive           = {}
+NS.stateSeq              = 0
 
 -- Bridge availability: "unknown" until detection resolves, then "present"
 -- (HELLO_ACK received) or "absent" (detection timed out). Drives whether
@@ -438,6 +446,37 @@ NS.CB_SendBotCommand = function(botName, command)
     NS.CB_EnqueueRequest(strlower(botName), function() CB_SendBotCommandRaw(botName, command) end)
 end
 
+local function CB_BeginStateRequest(isGlobal, botName)
+    NS.stateSeq = (NS.stateSeq or 0) + 1
+    local suffix = isGlobal and "states" or "state"
+    local token = tostring(math.floor(GetTime() * 1000)) .. "-" .. suffix .. "-" .. tostring(NS.stateSeq)
+    NS.stateRequests[token] = {
+        token         = token,
+        global        = isGlobal == true,
+        botName       = botName or "",
+        startedAt     = GetTime(),
+        begun         = false,
+        expectedBots  = 0,
+        completedBots = 0,
+    }
+    NS.CB_After(10.0, function()
+        if NS.stateRequests[token] then
+            NS.stateRequests[token] = nil
+        end
+    end)
+    return token
+end
+
+local function CB_ClearStateRequest(token)
+    if not token then return end
+    NS.stateRequests[token] = nil
+    for k, v in pairs(NS.stateActive) do
+        if v.token == token then
+            NS.stateActive[k] = nil
+        end
+    end
+end
+
 NS.CB_RequestSync = function()
     if NS.syncPending then return end
     NS.syncPending = true
@@ -446,7 +485,12 @@ NS.CB_RequestSync = function()
         if CB_EffectiveBridgeState() == "present" then
             CB_SendBridge("GET~ROSTER")
             CB_SendBridge("GET~DETAILS")
-            CB_SendBridge("GET~STATES")
+            if NS.stateFramingCapable then
+                local token = CB_BeginStateRequest(true)
+                CB_SendBridge("GET~STATES~" .. token)
+            else
+                CB_SendBridge("GET~STATES")
+            end
         elseif CB_EffectiveBridgeState() == "absent" then
             CB_ProbePartyForBots()
         end
@@ -462,10 +506,9 @@ NS.CB_RequestRosterThenRefresh = function()
 end
 
 -- Lightweight, debounced strategy-state re-sync (bridge path). Unlike
--- CB_RequestSync it sends ONLY GET~STATES — no ROSTER/DETAILS and no RefreshTabs —
--- so it reconciles strategy flags (via the STATE~ handler → CB_StoreCombat/
--- CB_StoreNonCombat → CB_UpdateTabData) without tab/inspect churn. Used to verify a
--- strategy toggle silently after sending it over the bridge.
+-- CB_RequestSync it sends ONLY GET~STATES (framed when capable) — no ROSTER/DETAILS
+-- and no RefreshTabs — so it reconciles strategy flags without tab/inspect churn.
+-- Used to verify a strategy toggle silently after sending it over the bridge.
 NS.statesPending = false
 NS.CB_RequestStates = function()
     if NS.statesPending then return end
@@ -473,7 +516,12 @@ NS.CB_RequestStates = function()
     NS.CB_After(0.4, function()
         NS.statesPending = false
         if CB_EffectiveBridgeState() == "present" then
-            CB_SendBridge("GET~STATES")
+            if NS.stateFramingCapable then
+                local token = CB_BeginStateRequest(true)
+                CB_SendBridge("GET~STATES~" .. token)
+            else
+                CB_SendBridge("GET~STATES")
+            end
         end
     end)
 end
@@ -554,6 +602,67 @@ local function CB_FinalizeQuestCollection(key, entry)
     entry.questStaging = nil
     local f = NS.botQuestFrames and NS.botQuestFrames[key]
     if f and f:IsShown() and NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
+end
+
+-- Finalizes a bridge spellbook collection: sorts the staged spells,
+-- saves them into entry.spells, and updates the UI if open.
+---@param key   string  Bot name-key.
+---@param entry table   The bot roster entry being finalized.
+local function CB_FinalizeSpellbookCollection(key, entry)
+    entry.awaitingSpellbook = false
+    entry.spellbookTimeout  = 0
+    if entry.spellbookStaging and #entry.spellbookStaging > 0 then
+        table.sort(entry.spellbookStaging, function(a, b)
+            if a.isPassive ~= b.isPassive then
+                return not a.isPassive
+            end
+            return (a.name or "") < (b.name or "")
+        end)
+        entry.spells = entry.spellbookStaging
+    end
+    entry.spellbookStaging = nil
+    entry.spellbookSeen    = nil
+    local f = NS.botSpellbookFrames and NS.botSpellbookFrames[key]
+    if f and f:IsShown() and NS.CB_RenderSpellbook then
+        NS.CB_RenderSpellbook(key)
+    end
+end
+
+-- Requests the bot's spellbook via Bridge (GET~SPELLBOOK)
+---@param key     string   Bot name-key.
+---@param botName string?  Display name.
+---@param force   boolean? True to force refresh even if cached.
+NS.spellbookSeq = NS.spellbookSeq or 0
+NS.CB_RequestSpellbook = function(key, botName, force)
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    if not entry then
+        local bName = botName or key
+        entry = {
+            name      = bName,
+            class     = "WARRIOR",
+            combat    = NS.CB_DefaultCombat and NS.CB_DefaultCombat(),
+            nonCombat = NS.CB_DefaultNonCombat and NS.CB_DefaultNonCombat(),
+            classData = NS.CB_DefaultClassData and NS.CB_DefaultClassData("WARRIOR"),
+        }
+        CleanBot_PartyBots[key] = entry
+    end
+
+    if not force and entry.spells and #entry.spells > 0 then
+        if NS.CB_RenderSpellbook then NS.CB_RenderSpellbook(key) end
+        return
+    end
+
+    entry.awaitingSpellbook = true
+    entry.spellbookStaging  = {}
+    entry.spellbookSeen     = {}
+
+    local bName = botName or entry.name or key
+    NS.spellbookSeq = NS.spellbookSeq + 1
+    local token = tostring(math.floor(GetTime() * 1000)) .. "-" .. tostring(NS.spellbookSeq)
+    entry.spellbookToken = token
+
+    CB_SendBridge(string.format("GET~SPELLBOOK~%s~%s", bName, token))
+    if NS.CB_RenderSpellbook then NS.CB_RenderSpellbook(key) end
 end
 
 -- ============================================================
@@ -706,7 +815,7 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             end
         end
 
-        if entry.awaitingBank then
+        if entry.awaitingBank and entry.bankStaging then
             entry.bankTimeout = (entry.bankTimeout or 0) + dt
             if entry.bankTimeout >= NS.WHISPER_SILENCE then
                 entry.awaitingBank = false
@@ -717,14 +826,12 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                 -- cleanly. No money/bag fetch — the bank reply carries no summary.
                 -- Only swap when the reply actually arrived (else keep the stale list,
                 -- so a lost/late reply doesn't wipe the bank to empty).
-                if entry.bankStaging then
-                    if entry.bankReplyArrived and entry.bank then
-                        entry.bank.items = entry.bankStaging
-                    end
-                    entry.bankStaging      = nil
-                    entry.bankReplyArrived = nil
+                if entry.bankReplyArrived and entry.bank then
+                    entry.bank.items = entry.bankStaging
                 end
-                entry.curItemSection = nil
+                entry.bankStaging      = nil
+                entry.bankReplyArrived = nil
+                entry.curItemSection   = nil
 
                 local f = NS.botBankFrames and NS.botBankFrames[key]
                 if f and f:IsShown() then
@@ -768,14 +875,47 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             CB_PumpQueue(key)
         end
     end
+
+    -- Safety net for in-flight Bridge bank requests (clears overlay on network drop/timeout)
+    if NS.pendingBankRequests then
+        local now = GetTime()
+        for token, req in pairs(NS.pendingBankRequests) do
+            if now >= req.expires then
+                NS.pendingBankRequests[token] = nil
+                local entry = CleanBot_PartyBots[req.key]
+                if entry and entry.awaitingBank and not entry.bankStaging then
+                    entry.awaitingBank = false
+                    local bf = NS.botBankFrames and NS.botBankFrames[req.key]
+                    if bf and NS.CB_SetInventoryLoading then
+                        NS.CB_SetInventoryLoading(bf, false)
+                    end
+                end
+            end
+        end
+    end
 end)
+
+NS.pendingBankRequests = NS.pendingBankRequests or {}
+
+local bankSeq = 0
+local function CB_NextBankToken(prefix)
+    bankSeq = (bankSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "bank") .. "-" .. tostring(bankSeq)
+end
+
+local invSeq = 0
+local function CB_NextInvToken(prefix)
+    invSeq = (invSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "inv") .. "-" .. tostring(invSeq)
+end
 
 -- Performs the actual inventory fetch (sets the busy flag + sends). Runs from the serial
 -- queue so it never overlaps another reply stream. Bridge path is instant; whisper path
 -- streams the "items" reply, collected via invStaging and finalized on silence.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
-local function CB_DoFetchInventory(key, botName)
+---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
+local function CB_DoFetchInventory(key, botName, manual)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
@@ -792,17 +932,21 @@ local function CB_DoFetchInventory(key, botName)
     entry.curItemSection    = nil    -- reset header-routed staging for the new collection
     entry.invReplyArrived   = false  -- set true when the reply (header/item) actually lands
 
-    -- Overlay policy: always for a first (empty) load, but for a refresh of an
-    -- already-rendered grid only on the whisper path — bridge refreshes are
-    -- near-instant, so a "Refreshing..." flash there is distracting noise.
+    -- Overlay policy: always for a first (empty) load or manual refresh button click, but
+    -- for background auto-reconciles of an already-rendered grid only on the whisper path.
     local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
-    entry.invOverlay = (not (invF and invF.rendered)) or not useBridge
+    entry.invOverlay = (manual == true) or (not (invF and invF.rendered)) or not useBridge
     if invF and invF:IsShown() and entry.invOverlay and NS.CB_SetInventoryLoading then
         NS.CB_SetInventoryLoading(invF, true)
     end
 
     if useBridge then
-        CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
+        if NS.capabilities and NS.capabilities["INVENTORY_EXACT_V1"] then
+            local token = CB_NextInvToken("exinv")
+            CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
+        else
+            CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
+        end
     else
         -- invStaging is the whisper-path marker: its presence tells the tick to run the
         -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
@@ -816,8 +960,9 @@ end
 -- Enqueues an inventory fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
-NS.CB_FetchInventory = function(key, botName)
-    NS.CB_EnqueueRequest(key, function() CB_DoFetchInventory(key, botName) end)
+---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
+NS.CB_FetchInventory = function(key, botName, manual)
+    NS.CB_EnqueueRequest(key, function() CB_DoFetchInventory(key, botName, manual) end)
 end
 
 -- How long a fetched "stats" reply is considered fresh. Re-selecting a bot within this
@@ -890,7 +1035,8 @@ end
 -- queue so the multi-line reply never overlaps another stream.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper target).
-local function CB_DoFetchBank(key, botName)
+---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
+local function CB_DoFetchBank(key, botName, manual)
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
 
@@ -901,25 +1047,37 @@ local function CB_DoFetchBank(key, botName)
     entry.curItemSection  = nil
     entry.bankReplyArrived = false  -- set true when the reply (header/item) actually lands
 
-    -- Bank is always whisper-only (replies trickle in over ~0.5s+), so always show
-    -- the overlay — "Loading..." on a first fetch, "Refreshing..." over rendered data.
-    entry.bankOverlay = true
-    local bf = NS.botBankFrames and NS.botBankFrames[key]
-    if bf and bf:IsShown() and NS.CB_SetInventoryLoading then
-        NS.CB_SetInventoryLoading(bf, true)
+    local useBridge = CB_EffectiveBridgeState() == "present"
+    local bankF = NS.botBankFrames and NS.botBankFrames[key]
+    entry.bankOverlay = (manual == true) or (not (bankF and bankF.rendered)) or not useBridge
+    if bankF and bankF:IsShown() and entry.bankOverlay and NS.CB_SetInventoryLoading then
+        NS.CB_SetInventoryLoading(bankF, true)
     end
 
-    -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
-    -- Raw send: this already runs from the queue (CB_FetchBank enqueued it).
-    entry.bankStaging = {}
-    CB_SendBotCommandRaw(botName, "bank")
+    if useBridge then
+        local token = CB_NextBankToken("bank")
+        NS.pendingBankRequests[token] = {
+            key = key,
+            botName = botName,
+            items = {},
+            expires = GetTime() + 2.5,
+            failed = false,
+        }
+        CB_SendBridge("GET~BANK~" .. botName .. "~" .. token)
+    else
+        -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
+        -- Raw send: this already runs from the queue (CB_FetchBank enqueued it).
+        entry.bankStaging = {}
+        CB_SendBotCommandRaw(botName, "bank")
+    end
 end
 
 -- Enqueues a bank fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper target).
-NS.CB_FetchBank = function(key, botName)
-    NS.CB_EnqueueRequest(key, function() CB_DoFetchBank(key, botName) end)
+---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
+NS.CB_FetchBank = function(key, botName, manual)
+    NS.CB_EnqueueRequest(key, function() CB_DoFetchBank(key, botName, manual) end)
 end
 
 -- Debounced post-action reconcile. A burst of optimistic item moves (deposit/withdraw,
@@ -970,6 +1128,138 @@ end)
 NS.CB_RequestInventory = function(key, botName, anchor)
     NS.CB_FetchInventory(key, botName)
     NS.CB_ToggleInventory(key, botName, anchor)
+end
+
+-- Sells all gray items for a single bot. Uses INVENTORY_BULK_SELL_V1 if available,
+-- otherwise falls back to whisper "s gray".
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+NS.CB_BridgeBulkSell = function(key, botName)
+    if CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["INVENTORY_BULK_SELL_V1"] then
+        local token = CB_NextInvToken("bsell")
+        CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~SELL_GREY~0~0")
+    else
+        NS.CB_SendBotCommand(botName, "s gray")
+        NS.CB_ScheduleReconcile(key, botName)
+    end
+end
+
+-- Sells all gray items for every bot in the group. Uses INVENTORY_BULK_SELL_V1 if available,
+-- otherwise broadcasts "s gray" to the group.
+NS.CB_BridgeGroupBulkSell = function()
+    if CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["INVENTORY_BULK_SELL_V1"] then
+        if NS.CB_ForEachGroupMember then
+            NS.CB_ForEachGroupMember(function(_, name)
+                local key = name and strlower(name)
+                if key and CleanBot_PartyBots[key] then
+                    local token = CB_NextInvToken("gbsell")
+                    CB_SendBridge("RUN~ITEM_ACTION~" .. name .. "~" .. token .. "~SELL_GREY~0~0")
+                end
+            end)
+        else
+            for key, entry in pairs(CleanBot_PartyBots) do
+                if entry and entry.name then
+                    local token = CB_NextInvToken("gbsell")
+                    CB_SendBridge("RUN~ITEM_ACTION~" .. entry.name .. "~" .. token .. "~SELL_GREY~0~0")
+                end
+            end
+        end
+    else
+        NS.CB_SendGroupCommand("s gray")
+        if NS.CB_ForEachGroupMember and NS.CB_ScheduleReconcile then
+            NS.CB_ForEachGroupMember(function(_, name)
+                local key = name and strlower(name)
+                if key and CleanBot_PartyBots[key] then NS.CB_ScheduleReconcile(key, name) end
+            end)
+        end
+    end
+end
+
+-- Equips an item on a bot. Uses ITEM_EQUIP_V1 if exact bag/slot coordinates are available,
+-- otherwise falls back to whisper "e <link>".
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+---@param link    string Item link.
+---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
+NS.CB_BridgeEquipItem = function(key, botName, link, cell)
+    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_EQUIP_V1"] then
+        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+        local count = cell.count or 1
+        local token = CB_NextInvToken("equip")
+        CB_SendBridge("RUN~ITEM_EQUIP~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    else
+        NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
+    end
+    NS.CB_After(1.5, function()
+        NS.CB_FetchInventory(key, botName)
+        if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
+            for _, info in ipairs(NS.tabList) do
+                if info.key == key and info.unit then
+                    NS.CB_QueueEquipRefresh({ { key = key, unit = info.unit } })
+                    break
+                end
+            end
+        end
+    end)
+end
+
+-- Uses an item (consumable). Uses ITEM_USE_V1 if exact bag/slot coordinates are available,
+-- otherwise falls back to whisper "u <link>".
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+---@param link    string Item link.
+---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
+NS.CB_BridgeUseItem = function(key, botName, link, cell)
+    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_USE_V1"] then
+        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+        local count = cell.count or 1
+        local token = CB_NextInvToken("use")
+        CB_SendBridge("RUN~ITEM_USE~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    else
+        NS.CB_SendBotCommand(botName, "u " .. NS.CB_CleanItemLink(link))
+    end
+    NS.CB_ScheduleReconcile(key, botName)
+end
+
+-- Destroys an item. Uses ITEM_DESTROY_V1 if exact bag/slot coordinates are available,
+-- otherwise falls back to whisper "destroy <link>".
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+---@param link    string Item link.
+---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
+NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
+    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_DESTROY_V1"] then
+        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+        local count = cell.count or 1
+        local token = CB_NextInvToken("destroy")
+        CB_SendBridge("RUN~ITEM_DESTROY~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    else
+        NS.CB_SendBotCommand(botName, "destroy " .. NS.CB_CleanItemLink(link))
+    end
+    NS.CB_ScheduleReconcile(key, botName)
+end
+
+-- Deposits an item to personal bank or guild bank via ITEM_DEPOSIT_EXACT_V1 if exact
+-- bag/slot coordinates are available and Bridge is active. Returns true if sent via Bridge,
+-- false if caller should fall back to whisper.
+---@param botName string  Bot's display name.
+---@param action  string  "BANK_DEPOSIT" or "GBANK_DEPOSIT".
+---@param cell    table?  Inventory cell button carrying exact coordinates.
+---@return boolean sentViaBridge
+NS.CB_BridgeDepositItem = function(botName, action, cell)
+    if CB_EffectiveBridgeState() ~= "present" then return false end
+    if not (NS.capabilities and NS.capabilities["ITEM_DEPOSIT_EXACT_V1"]) then return false end
+    if not cell or cell.bag == nil or cell.slot == nil then return false end
+    local itemId = cell.itemId or tonumber(strmatch(cell.itemLink or "", "item:(%d+)")) or 0
+    if itemId <= 0 then return false end
+    local count = cell.count or 1
+
+    local token = CB_NextBankToken("dep")
+    CB_SendBridge("RUN~ITEM_DEPOSIT_EXACT~" .. botName .. "~" .. token .. "~" .. action .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    return true
 end
 
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
@@ -1360,6 +1650,31 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CleanBot_FetchLinkedAccounts()
             end
 
+        elseif msg and (msg == "CAPS_BEGIN" or strsub(msg, 1, 11) == "CAPS_BEGIN~") then
+            NS.capabilities          = {}
+            NS.stateFramingCapable   = false
+            NS.capabilitiesResolved  = false
+            NS.capabilityBatchActive = true
+
+        elseif msg and strsub(msg, 1, 5) == "CAPS~" then
+            local capsStr = strsub(msg, 6)
+            for cap in gmatch(capsStr, "[^,]+") do
+                cap = cap:match("^%s*(.-)%s*$")
+                if cap ~= "" then
+                    NS.capabilities[cap] = true
+                    if cap == "STATE_FRAMING_V1" then
+                        NS.stateFramingCapable = true
+                    end
+                end
+            end
+            if not NS.capabilityBatchActive then
+                NS.capabilitiesResolved = true
+            end
+
+        elseif msg and (msg == "CAPS_END" or strsub(msg, 1, 9) == "CAPS_END~") then
+            NS.capabilityBatchActive = false
+            NS.capabilitiesResolved  = true
+
         elseif CB_EffectiveBridgeState() ~= "present" then
             -- Override forces the no-bridge path: ignore all inbound bridge data
             -- packets (ROSTER~/DETAIL~/STATE~/INV_*/QUESTS_*) so the cache is only
@@ -1414,6 +1729,109 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CleanBot_RefreshTabs()
             end
 
+        -- ── Strategy framed packets (STATE_FRAMING_V1) ──────────────────────
+        elseif msg and strsub(msg, 1, 13) == "STATES_BEGIN~" then
+            local rest = strsub(msg, 14)
+            local token, botCount = NS.CB_SplitOnce(rest, "~")
+            local req = NS.stateRequests[token]
+            if req and req.global then
+                req.begun         = true
+                req.expectedBots  = tonumber(botCount) or 0
+                req.completedBots = 0
+            end
+
+        elseif msg and strsub(msg, 1, 12) == "STATE_BEGIN~" then
+            local rest = strsub(msg, 13)
+            local token, r2 = NS.CB_SplitOnce(rest, "~")
+            local rawName, r3 = NS.CB_SplitOnce(r2, "~")
+            local cCount, nCount = NS.CB_SplitOnce(r3, "~")
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            if botName and botName ~= "" then
+                local botKey = strlower(botName)
+                local txKey = token .. "~" .. botKey
+                NS.stateActive[txKey] = {
+                    token          = token,
+                    botName        = botName,
+                    botKey         = botKey,
+                    combatExpected = tonumber(cCount) or 0,
+                    normalExpected = tonumber(nCount) or 0,
+                    combat         = {},
+                    normal         = {},
+                }
+            end
+
+        elseif msg and strsub(msg, 1, 11) == "STATE_ITEM~" then
+            local rest = strsub(msg, 12)
+            local token, r2 = NS.CB_SplitOnce(rest, "~")
+            local rawName, r3 = NS.CB_SplitOnce(r2, "~")
+            local scope, r4 = NS.CB_SplitOnce(r3, "~")
+            local idxStr, rawStrategy = NS.CB_SplitOnce(r4, "~")
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            local botKey = strlower(botName)
+            local txKey = token .. "~" .. botKey
+            local tx = NS.stateActive[txKey]
+            if tx then
+                local index = tonumber(idxStr)
+                local strategy = CB_UrlDecode(rawStrategy)
+                if index then
+                    scope = strupper(scope)
+                    if scope == "C" then
+                        tx.combat[index] = strategy
+                    elseif scope == "N" then
+                        tx.normal[index] = strategy
+                    end
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 10) == "STATE_END~" then
+            local rest = strsub(msg, 11)
+            local token, r2 = NS.CB_SplitOnce(rest, "~")
+            local rawName, r3 = NS.CB_SplitOnce(r2, "~")
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            local botKey = strlower(botName)
+            local txKey = token .. "~" .. botKey
+            local tx = NS.stateActive[txKey]
+            if tx then
+                local combatStr = table.concat(tx.combat, ", ")
+                local ncStr     = table.concat(tx.normal, ", ")
+                local entry     = CleanBot_PartyBots[botKey]
+                if not entry then
+                    local class = NS.CB_ResolveClass(botName, "WARRIOR")
+                    entry = {
+                        name      = botName,
+                        class     = class,
+                        combat    = NS.CB_DefaultCombat(),
+                        nonCombat = NS.CB_DefaultNonCombat(),
+                        classData = NS.CB_DefaultClassData(class),
+                    }
+                    CleanBot_PartyBots[botKey] = entry
+                else
+                    entry.class = NS.CB_ResolveClass(botName, entry.class)
+                end
+                NS.CB_StoreCombat(entry, combatStr)
+                NS.CB_StoreNonCombat(entry, ncStr)
+                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(botKey) end
+                NS.stateActive[txKey] = nil
+                local req = NS.stateRequests[token]
+                if req and req.global then
+                    req.completedBots = (req.completedBots or 0) + 1
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 11) == "STATES_END~" then
+            local rest = strsub(msg, 12)
+            local token = NS.CB_SplitOnce(rest, "~")
+            CB_ClearStateRequest(token)
+            if CleanBotFrame:IsShown() then
+                NS.CleanBot_RefreshTabs()
+            end
+
+        elseif msg and strsub(msg, 1, 12) == "STATE_ABORT~" then
+            local rest = strsub(msg, 13)
+            local token = NS.CB_SplitOnce(rest, "~")
+            CB_ClearStateRequest(token)
+
+        -- ── Strategy legacy snapshot (fallback) ─────────────────────────────
         elseif msg and strsub(msg, 1, 6) == "STATE~" then
             -- Bridge strategy snapshot for one bot: STATE~Name~combat~nonCombat
             -- (combat / nonCombat are comma-separated strategy lists.)
@@ -1504,6 +1922,238 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CB_SetInventoryLoading(f, false)
             end
 
+        -- ── Exact physical inventory packets (INVENTORY_EXACT_V1) ────────
+        elseif msg and strsub(msg, 1, 16) == "INV_EXACT_BEGIN~" then
+            local rest = strsub(msg, 17)
+            local name = NS.CB_SplitOnce(rest, "~")
+            local key  = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.inventory = entry.inventory or {}
+                entry.inventory.items = {}
+                entry.inventory.exactBagTotal = 0
+            end
+
+        elseif msg and strsub(msg, 1, 8) == "INV_BAG~" then
+            -- INV_BAG~<botName>~<token>~<kind>~<bag>~<slotStart>~<slotCount>~<bagItemId>
+            local rest = strsub(msg, 9)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local kind, r4 = NS.CB_SplitOnce(r3, "~")
+            local _, r5 = NS.CB_SplitOnce(r4, "~")
+            local _, r6 = NS.CB_SplitOnce(r5, "~")
+            local slotCount = NS.CB_SplitOnce(r6, "~")
+            local key = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry and entry.inventory and (kind == "BACKPACK" or kind == "BAG") then
+                local count = tonumber(slotCount) or 0
+                entry.inventory.exactBagTotal = (entry.inventory.exactBagTotal or 0) + count
+                entry.inventory.bagTotal = entry.inventory.exactBagTotal
+            end
+
+        elseif msg and strsub(msg, 1, 13) == "INV_ITEM_LOC~" then
+            -- INV_ITEM_LOC~<botName>~<token>~<srcBag>~<srcSlot>~<itemId>~<count>~<isSoulbound>
+            local rest = strsub(msg, 14)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local srcBag, r4 = NS.CB_SplitOnce(r3, "~")
+            local srcSlot, r5 = NS.CB_SplitOnce(r4, "~")
+            local itemId, r6 = NS.CB_SplitOnce(r5, "~")
+            local count, isSoulbound = NS.CB_SplitOnce(r6, "~")
+            local key = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry and entry.inventory then
+                local numId = tonumber(itemId) or 0
+                local numCount = tonumber(count) or 1
+                local numBag = tonumber(srcBag) or 0
+                local numSlot = tonumber(srcSlot) or 0
+                local itemName, link = GetItemInfo(numId)
+                if not link then
+                    link = "|cffffffff|Hitem:" .. numId .. ":0:0:0:0:0:0:0:0|h[" .. (itemName or ("Item " .. numId)) .. "]|h|r"
+                end
+                local items = entry.inventory.items
+                items[#items + 1] = {
+                    link = link,
+                    count = numCount,
+                    bag = numBag,
+                    slot = numSlot,
+                    itemId = numId,
+                    soulbound = (isSoulbound == "1" or isSoulbound == "true"),
+                }
+            end
+
+        elseif msg and strsub(msg, 1, 14) == "INV_EXACT_END~" then
+            local rest = strsub(msg, 15)
+            local name = NS.CB_SplitOnce(rest, "~")
+            local key  = strlower(name)
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.awaitingInventory = false
+                if entry.inventory then
+                    entry.inventory.bagUsed = #entry.inventory.items
+                end
+            end
+            local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+            if f and f:IsShown() then
+                NS.CB_RenderInventory(key)
+            elseif f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, false)
+            end
+
+        -- ── Inventory & Item action ACKs ──────────────────────────────────
+        elseif msg and strsub(msg, 1, 22) == "INVENTORY_ITEM_ACTION~" then
+            -- INVENTORY_ITEM_ACTION~<botName>~<token>~<action>~<status>~<moved>
+            local rest = strsub(msg, 23)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local action, r4 = NS.CB_SplitOnce(r3, "~")
+            local status, moved = NS.CB_SplitOnce(r4, "~")
+            local key = strlower(name)
+            local movedCount = tonumber(moved) or 0
+            if status == "OK" then
+                if action == "SELL_GREY" and movedCount > 0 and NS.CB_Print then
+                    NS.CB_Print(string.format("%s: %d grey item(s) sold.", name, movedCount))
+                end
+            end
+            NS.CB_ScheduleReconcile(key, name)
+
+        elseif msg and strsub(msg, 1, 21) == "INVENTORY_ITEM_EQUIP~" then
+            local rest = strsub(msg, 22)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local status = NS.CB_SplitOnce(r3, "~")
+            local key = strlower(name)
+            if status ~= "OK" then
+                NS.CB_ScheduleReconcile(key, name)
+            end
+
+        elseif msg and strsub(msg, 1, 19) == "INVENTORY_ITEM_USE~" then
+            local rest = strsub(msg, 20)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local status = NS.CB_SplitOnce(r3, "~")
+            local key = strlower(name)
+            if status ~= "OK" then
+                NS.CB_ScheduleReconcile(key, name)
+            end
+
+        elseif msg and strsub(msg, 1, 23) == "INVENTORY_ITEM_DESTROY~" then
+            local rest = strsub(msg, 24)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local status = NS.CB_SplitOnce(r3, "~")
+            local key = strlower(name)
+            if status ~= "OK" then
+                NS.CB_ScheduleReconcile(key, name)
+            end
+
+        -- ── Bank packets (mod-multibot-bridge) ───────────────────────────
+        -- BANK_BEGIN~<botName>~<token>
+        elseif msg and strsub(msg, 1, 11) == "BANK_BEGIN~" then
+            local rest = strsub(msg, 12)
+            local rawName, token = NS.CB_SplitOnce(rest, "~")
+            local botName = CB_UrlDecode(rawName)
+            local key = strlower(botName)
+            local req = token and NS.pendingBankRequests and NS.pendingBankRequests[token]
+            if req then
+                req.items = {}
+                req.failed = false
+            end
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.bank = entry.bank or { items = {} }
+            end
+
+        -- BANK_ITEM~<botName>~<token>~<urlEncodedItemLine>
+        elseif msg and strsub(msg, 1, 10) == "BANK_ITEM~" then
+            local rest = strsub(msg, 11)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, rawLine = NS.CB_SplitOnce(r2, "~")
+            local req = token and NS.pendingBankRequests and NS.pendingBankRequests[token]
+            if req and rawLine then
+                local line = CB_UrlDecode(rawLine)
+                local item = NS.CB_ParseItemLine and NS.CB_ParseItemLine(line)
+                if item then
+                    req.items[#req.items + 1] = item
+                end
+            end
+
+        -- BANK_ERROR~<botName>~<token>~<reason>
+        elseif msg and strsub(msg, 1, 11) == "BANK_ERROR~" then
+            local rest = strsub(msg, 12)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, reason = NS.CB_SplitOnce(r2, "~")
+            local botName = CB_UrlDecode(rawName)
+            local key = strlower(botName)
+            local req = token and NS.pendingBankRequests and NS.pendingBankRequests[token]
+            if req then
+                req.failed = true
+                req.reason = reason
+            end
+            if reason == "BANKER_NOT_FOUND" then
+                local entry = CleanBot_PartyBots[key]
+                if entry then entry.awaitingBank = false end
+                local bf = NS.botBankFrames and NS.botBankFrames[key]
+                if bf and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(bf, false)
+                end
+                StaticPopup_Show("CLEANBOT_NO_BANKER", botName)
+            end
+
+        -- BANK_END~<botName>~<token>
+        elseif msg and strsub(msg, 1, 9) == "BANK_END~" then
+            local rest = strsub(msg, 10)
+            local rawName, token = NS.CB_SplitOnce(rest, "~")
+            local botName = CB_UrlDecode(rawName)
+            local key = strlower(botName)
+            local req = token and NS.pendingBankRequests and NS.pendingBankRequests[token]
+            if req then NS.pendingBankRequests[token] = nil end
+
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.awaitingBank = false
+                if req and not req.failed and entry.bank then
+                    entry.bank.items = req.items
+                end
+            end
+            local f = NS.botBankFrames and NS.botBankFrames[key]
+            if f and f:IsShown() then
+                NS.CB_RenderBank(key)
+            elseif f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, false)
+            end
+
+        -- ITEM_DEPOSIT_EXACT~<botName>~<token>~<status>~<reason>~<action>~<srcBag>~<srcSlot>~<srcItemId>~<srcCount>~<moved>
+        elseif msg and strsub(msg, 1, 20) == "ITEM_DEPOSIT_EXACT~" then
+            local rest = strsub(msg, 21)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local status, r4 = NS.CB_SplitOnce(r3, "~")
+            local rawReason, r5 = NS.CB_SplitOnce(r4, "~")
+            local action = NS.CB_SplitOnce(r5, "~")
+            local botName = CB_UrlDecode(rawName)
+            local key = strlower(botName)
+            local reason = CB_UrlDecode(rawReason)
+
+            if status == "OK" then
+                NS.CB_ScheduleReconcile(key, botName)
+            else
+                if reason == "BANKER_NOT_FOUND" then
+                    StaticPopup_Show("CLEANBOT_NO_BANKER", botName)
+                    NS.CB_FetchInventory(key, botName)
+                    local bf = NS.botBankFrames and NS.botBankFrames[key]
+                    if bf and bf:IsShown() then NS.CB_RenderBank(key) end
+                elseif reason == "GUILD_BANK_NOT_FOUND" or reason == "NO_GUILD_BANK_RIGHTS"
+                    or reason == "GUILD_BANK_FULL" or reason == "BOT_NOT_IN_GUILD" or reason == "NOT_IN_SAME_GUILD" then
+                    StaticPopup_Show("CLEANBOT_NO_GUILD_BANK", botName)
+                    NS.CB_FetchInventory(key, botName)
+                    local bf = NS.botBankFrames and NS.botBankFrames[key]
+                    if bf and bf:IsShown() then NS.CB_RenderBank(key) end
+                else
+                    NS.CB_ScheduleReconcile(key, botName)
+                end
+            end
+
         -- ── Quest log packets ────────────────────────────────────────────
         -- Request: GET~QUESTS~ALL~botName~quests
         -- Packets: QUESTS_BEGIN~name~token~mode
@@ -1550,6 +2200,73 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local f    = NS.botQuestFrames and NS.botQuestFrames[key]
             if f and f:IsShown() then
                 if NS.CB_RenderQuests then NS.CB_RenderQuests(key) end
+            end
+
+        elseif msg and (strsub(msg, 1, 9) == "SB_BEGIN~" or strsub(msg, 1, 15) == "SPELLBOOK_BEGIN~") then
+            local rest = (strsub(msg, 1, 9) == "SB_BEGIN~") and strsub(msg, 10) or strsub(msg, 16)
+            local name, token = NS.CB_SplitOnce(rest, "~")
+            local key = strlower(strtrim(name or ""))
+            local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+            if not entry then
+                entry = {
+                    name      = strtrim(name or ""),
+                    class     = "WARRIOR",
+                    combat    = NS.CB_DefaultCombat and NS.CB_DefaultCombat(),
+                    nonCombat = NS.CB_DefaultNonCombat and NS.CB_DefaultNonCombat(),
+                    classData = NS.CB_DefaultClassData and NS.CB_DefaultClassData("WARRIOR"),
+                }
+                CleanBot_PartyBots[key] = entry
+            end
+            entry.awaitingSpellbook = true
+            entry.spellbookStaging  = {}
+            entry.spellbookSeen     = {}
+            local f = NS.botSpellbookFrames and NS.botSpellbookFrames[key]
+            if f and f:IsShown() and NS.CB_RenderSpellbook then
+                NS.CB_RenderSpellbook(key)
+            end
+
+        elseif msg and (strsub(msg, 1, 8) == "SB_ITEM~" or strsub(msg, 1, 14) == "SPELLBOOK_ITEM~") then
+            local rest = (strsub(msg, 1, 8) == "SB_ITEM~") and strsub(msg, 9) or strsub(msg, 15)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, spellId = NS.CB_SplitOnce(r2, "~")
+            if (not spellId or spellId == "") and token ~= "" then
+                spellId = token
+            end
+            local key = strlower(strtrim(name or ""))
+            local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+            if entry and entry.spellbookStaging and spellId then
+                entry.spellbookSeen = entry.spellbookSeen or {}
+                for sId in spellId:gmatch("%d+") do
+                    local id = tonumber(sId)
+                    if id and id > 0 and not entry.spellbookSeen[id] then
+                        entry.spellbookSeen[id] = true
+                        local sName, rank, icon = GetSpellInfo(id)
+                        local isPassive = (IsPassiveSpell and IsPassiveSpell(id)) or false
+                        local link = GetSpellLink and GetSpellLink(id)
+                        entry.spellbookStaging[#entry.spellbookStaging + 1] = {
+                            id        = id,
+                            name      = sName or ("Spell #" .. id),
+                            rank      = rank or "",
+                            icon      = icon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                            isPassive = isPassive,
+                            link      = link or "",
+                        }
+                    end
+                end
+            end
+
+        elseif msg and (strsub(msg, 1, 7) == "SB_END~" or strsub(msg, 1, 13) == "SPELLBOOK_END~") then
+            local rest = (strsub(msg, 1, 7) == "SB_END~") and strsub(msg, 8) or strsub(msg, 14)
+            local name, token = NS.CB_SplitOnce(rest, "~")
+            local key = strlower(strtrim(name or ""))
+            local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+            if entry then
+                CB_FinalizeSpellbookCollection(key, entry)
+            else
+                local f = NS.botSpellbookFrames and NS.botSpellbookFrames[key]
+                if f and f:IsShown() and NS.CB_RenderSpellbook then
+                    NS.CB_RenderSpellbook(key)
+                end
             end
         end
 
@@ -1657,6 +2374,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
         NS.bridgeDetecting  = false
+        NS.capabilities          = {}
+        NS.stateFramingCapable   = false
+        NS.capabilitiesResolved  = false
+        NS.capabilityBatchActive = false
+        NS.stateRequests         = {}
+        NS.stateActive           = {}
         -- Keep the Debug tab's "Auto (<state>)" label current.
         if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
         NS.probed           = {}

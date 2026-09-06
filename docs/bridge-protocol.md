@@ -43,19 +43,12 @@ but with no whisper log spam.
    `RAID_ROSTER_UPDATE` while state is still `unknown`, and when self-bot is enabled.
    It needs either a group or an active self-bot, and is idempotent.
 2. **Probe** — client sends `HELLO~1`.
-3. **Resolve** — a reply starting `HELLO_ACK~` ⇒ `bridgeState = "present"`, followed by an
-   immediate roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES`) and a linked-accounts
-   fetch. No ack within **3 s** ⇒ `bridgeState = "absent"`, and discovery falls back to
-   whisper probing (`co ?` to each group member; only bots reply with a `Strategies:` line).
-4. **Reset** — state returns to `unknown` at the first `PLAYER_ENTERING_WORLD` of a session;
-   `PLAYER_LOGOUT` clears the session flag so the next login is treated as fresh.
-
-On a **fresh login** (not `/reload`), `loginPhaseActive` blocks whisper probing until
-detection resolves — bots may not be in-world yet. Once detection resolves absent, the probe
-sweep runs and records each probed-but-unconfirmed member as a `joinCandidate`. A bot that
-wasn't in-world for its probe announces itself once loaded by whispering the player; that
-unsolicited whisper (any text — greetings vary by playerbots version) re-sends `co ?`, and the
-`Strategies:` reply confirms it. This replaces the old exact-`Hello!` match.
+3. **Resolve** — a reply starting `HELLO_ACK~` ⇒ `bridgeState = "present"`, accompanied
+   by capability broadcast packets (`CAPS_BEGIN`, `CAPS~<list>`, `CAPS_END`), followed by
+   an immediate debounced roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES` or
+   `GET~STATES~<token>`) and a linked-accounts fetch. No ack within **3 s** ⇒
+   `bridgeState = "absent"`, and discovery falls back to whisper probing (`co ?` to each
+   group member; only bots reply with a `Strategies:` line).
 
 ---
 
@@ -88,7 +81,8 @@ allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISP
 |---|---|---|
 | `GET~ROSTER` | Bot names in the group | `ROSTER~` |
 | `GET~DETAILS` | Per-bot identity/class | `DETAIL~` |
-| `GET~STATES` | Per-bot strategy snapshot | `STATE~` |
+| `GET~STATES~<token>` | Framed strategy snapshot (`STATE_FRAMING_V1` capable) | `STATES_BEGIN~` / `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATES_END~` / `STATE_ABORT~` |
+| `GET~STATES` | Per-bot strategy snapshot (legacy fallback) | `STATE~` |
 | `GET~INVENTORY~<botName>~inv` | Bot's bag contents + money | `INV_BEGIN~` / `INV_SUMMARY~` / `INV_ITEM~` / `INV_END~` |
 | `GET~QUESTS~ALL~<botName>~quests` | Bot's quest log | `QUESTS_BEGIN~` / `QUESTS_ITEM~` / `QUESTS_END~` |
 
@@ -105,9 +99,18 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | Packet | Layout | Handling |
 |---|---|---|
 | `HELLO_ACK~…` | — | Drives the real state machine (see below) |
+| `CAPS_BEGIN` | — | Resets capabilities table and initiates capability batch |
+| `CAPS~<c1>,<c2>,…` | comma-separated capabilities | Populates `NS.capabilities`; detects `STATE_FRAMING_V1` (`NS.stateFramingCapable`) |
+| `CAPS_END` | — | Marks `NS.capabilitiesResolved = true` |
 | `ROSTER~<rec>;<rec>;…` | one record per bot: `<name>,<classId>,<level>,<mapId>,<alive>,<hp%>,<mana%>` (`classId` = numeric `Player::getClass()`) | Seeds a minimal entry (name + class) for each unknown bot |
-| `DETAIL~<name>~?~?~<class>~…` | name + class | Establishes identity/class; preserves strategy data already parsed from `STATE~` |
-| `STATE~<name>~<combat>~<nonCombat>` | comma-separated strategy lists | Stored via `CB_StoreCombat` / `CB_StoreNonCombat`; creates a minimal entry if `STATE~` beats `ROSTER~` |
+| `DETAIL~<name>~?~?~<class>~…` | name + class | Establishes identity/class; preserves strategy data already parsed |
+| `STATES_BEGIN~<token>~<botCount>` | starts global state sync | Initializes transaction tracker for `<token>` with expected bot count |
+| `STATE_BEGIN~<token>~<name>~<cCount>~<nCount>` | starts bot state stream | Opens bot strategy accumulation buffer |
+| `STATE_ITEM~<token>~<name>~<scope>~<idx>~<strat>` | single strategy (`scope`: C=combat, N=normal) | Stored at index in buffer |
+| `STATE_END~<token>~<name>~<cCount>~<nCount>` | ends bot state stream | Assembles strategies, calls `CB_StoreCombat` / `CB_StoreNonCombat` and refreshes |
+| `STATES_END~<token>~<sentCount>` | ends global state sync | Clears request token, refreshes tabs |
+| `STATE_ABORT~<token>~<name>~<reason>` | abort notification | Clears active buffers and request token |
+| `STATE~<name>~<combat>~<nonCombat>` | comma-separated strategy lists (legacy fallback) | Stored via `CB_StoreCombat` / `CB_StoreNonCombat` |
 | `INV_BEGIN~<name>~…` | — | Resets `entry.inventory = { items = {} }` |
 | `INV_SUMMARY~<name>~<token>~<gold>~<silver>~<copper>~<bagUsed>~<bagTotal>` | money + bag counts | Bag is **used/total** (the whisper-path `stats` reply is free/total — converted on parse) |
 | `INV_ITEM~<name>~<token>~<encodedItem>` | one item per packet | Decoded by `NS.CB_ParseItemLine` |

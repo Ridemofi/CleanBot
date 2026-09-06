@@ -637,19 +637,40 @@ local function CB_BuildTalentGroup(parent, prevBottom, group, slot, tag, gi, reg
             info.tooltipOnButton = 1
             info.func            = function()
                 UIDropDownMenu_SetText(self, s.name)
-                local cd2 = getSource(CB_SlotEntry(slot))
+                local e2 = CB_SlotEntry(slot)
+                if e2 then
+                    e2.stagedSpec = s
+                    e2.stagedTime = GetTime()
+                end
+                local cd2 = getSource(e2)
                 if cd2 then
                     for _, rs in ipairs(strategies) do
                         cd2[rs.field] = (rs.field == s.field)
                     end
                 end
             end
-            info.checked = cd and (cd[s.field] == true)
+            local isStaged = (e and e.stagedSpec and e.stagedSpec.field == s.field)
+            info.checked = isStaged or (not (e and e.stagedSpec) and cd and (cd[s.field] == true))
             UIDropDownMenu_AddButton(info)
         end
     end)
     setBtn:SetScript("OnClick", function()
-        local cd = getSource(CB_SlotEntry(slot))
+        local e = CB_SlotEntry(slot)
+        local staged = e and e.stagedSpec
+        local cd = getSource(e)
+        if staged then
+            for _, m in ipairs(CB_SlotTargets(slot)) do
+                NS.CB_SendBotCommand(m.name, specWhisper .. " " .. staged.cmd)
+            end
+            if cd then
+                for _, rs in ipairs(strategies) do
+                    cd[rs.field] = (rs.field == staged.field)
+                end
+            end
+            UIDropDownMenu_SetText(dd, staged.name)
+            e.stagedTime = GetTime()
+            return
+        end
         if not cd then return end
         for _, s in ipairs(strategies) do
             if cd[s.field] == true then
@@ -1781,6 +1802,13 @@ end
 -- silent=true suppresses the emote wave (programmatic selections).
 SelectBot = function(key, silent)
     if not key then return end
+    if NS.selectedBotKey and NS.selectedBotKey ~= key then
+        local prevEntry = CleanBot_PartyBots[NS.selectedBotKey]
+        if prevEntry then
+            prevEntry.stagedSpec = nil
+            prevEntry.stagedTime = nil
+        end
+    end
     local slot = CB_LiveSlotForKey(key)
     if not slot then
         local d = CB_DesiredForKey(key)
@@ -2128,8 +2156,20 @@ NS.CB_SyncRegistry = function(frames, entry, groupCtx)
         local cd = cf.getSource and cf.getSource(entry)
         if cf.type == "dropdown" then
             local _, shown = syncDropdown(cf.dd, cf.strategies, cd, cf.noneLabel, cf.groupId)
-            if shown == 0 and cf.noneLabel then
-                UIDropDownMenu_SetText(cf.dd, cf.noneLabel)
+            if cf.whisper and entry and entry.stagedSpec then
+                if entry.stagedTime and (GetTime() - entry.stagedTime > 15) then
+                    entry.stagedSpec = nil
+                    entry.stagedTime = nil
+                else
+                    UIDropDownMenu_SetText(cf.dd, entry.stagedSpec.name)
+                end
+            end
+            if shown == 0 and not (cf.whisper and entry and entry.stagedSpec) then
+                if cf.noneLabel then
+                    UIDropDownMenu_SetText(cf.dd, cf.noneLabel)
+                elseif cf.whisper and entry and entry.dominantTree then
+                    UIDropDownMenu_SetText(cf.dd, entry.dominantTree)
+                end
             end
 
         elseif cf.type == "checkboxes" then
@@ -2225,12 +2265,20 @@ NS.CB_SyncTalentSpec = function(key)
         if sum > 0 then allZero = false end
         if sum > (totals[bestTab] or 0) then bestTab = tab end
     end
-    if allZero then return end   -- inspect data not actually readable (or untalented)
+    if allZero then
+        entry.dominantTree = nil
+        return
+    end
+
+    local a, b = GetTalentTabInfo(bestTab, true)
+    local treeName = (type(a) == "string" and a) or (type(b) == "string" and b) or nil
+    entry.dominantTree = treeName
 
     -- Need the premade spread list for this class; fetch (once) and retry on finalize.
     local specs = NS.premadeSpecs and NS.premadeSpecs[entry.class]
     if not specs then
         if NS.CB_FetchSpecList then NS.CB_FetchSpecList(key, entry) end
+        if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
         return
     end
 
@@ -2259,26 +2307,20 @@ NS.CB_SyncTalentSpec = function(key)
 
     -- Write the resolved selection (or clear on ambiguity) and let the existing
     -- registry sync set the dropdown text + checked state.
+    local stagedPending = entry.stagedSpec and not (entry.stagedTime and (GetTime() - entry.stagedTime > 15))
     for _, s in ipairs(talentGroup.strategies) do
-        src[s.field] = (s == matchedStrat) or false
-    end
-    if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
-
-    -- Ambiguous / unmatched: label the collapsed button with the dominant tree's
-    -- name (display only — the list itself still shows the real premade entries).
-    if not matchedStrat then
-        local a, b = GetTalentTabInfo(bestTab, true)
-        local treeName = (type(a) == "string" and a) or (type(b) == "string" and b) or nil
-        if treeName then
-            local frames = NS.botFrames and NS.botFrames[key]
-            if frames then
-                for _, cf in ipairs(frames) do
-                    if cf.whisper and cf.dd then
-                        UIDropDownMenu_SetText(cf.dd, treeName)
-                        break
-                    end
-                end
-            end
+        if stagedPending then
+            src[s.field] = (s.field == entry.stagedSpec.field)
+        else
+            src[s.field] = (s == matchedStrat) or false
         end
     end
+    if matchedStrat then
+        entry.dominantTree = nil
+        if entry.stagedSpec and matchedStrat.cmd == entry.stagedSpec.cmd then
+            entry.stagedSpec = nil
+            entry.stagedTime = nil
+        end
+    end
+    if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
 end

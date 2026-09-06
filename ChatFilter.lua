@@ -93,21 +93,84 @@ local function filterGroup(_, _, msg, sender)
     end)
 end
 
--- Incoming: hide a bot's reply while its command-reply window is open (see CB_MarkExpectReply
--- in Bridge.lua). The window opens when we whisper a command and is slid forward by one
--- WHISPER_SILENCE on each reply line, so it brackets the whole burst — one ack or a long
--- streamed dump — and closes once the bot goes quiet. Unsolicited bot greetings (a bot's
--- readiness whisper, with no command before it) are intentionally NOT hidden: their text
--- varies and isn't distinguishable from a human's, so they show once on join.
-local function filterWhisper(_, _, _, sender)
-    if not enabled() or not suppressibleParty(sender) then return false end
-    local key = strlower(sender)
-    local deadline = NS.botReplyWindow and NS.botReplyWindow[key]
-    if deadline and GetTime() < deadline then
-        NS.botReplyWindow[key] = GetTime() + NS.WHISPER_SILENCE   -- slide to keep bracketing the burst
-        return true
-    end
+NS.INVENTORY_BURST_SILENCE = 2.0
+NS.botInInventoryBurst = NS.botInInventoryBurst or {}
+
+--- Checks if a whisper line matches the structure of mod-playerbots inventory dump
+--- ("=== Inventory ===", category headers "--- other ---", item links "|Hitem:", or "Discount up to:").
+---@param msg string|nil
+---@return boolean
+local function isInventoryBurstLine(msg)
+    if not msg or msg == "" then return false end
+    if msg:match("^===%s*[iI]nventory%s*===") then return true end
+    if msg:match("^%s*%-%-%- .+ %-%-%-%s*$") then return true end
+    if msg:find("|Hitem:", 1, true) then return true end
+    if msg:match("^Discount up to:") then return true end
     return false
+end
+
+--- Arms an extended reply window (2.0s) for an expected inventory dump from a bot (e.g. on TRADE_SHOW).
+--- Avoids degradation if standard CB_MarkExpectReply (0.5s) was previously called.
+---@param botName string
+NS.CB_ArmInventoryBurst = function(botName)
+    if not enabled() or not botName or botName == "" then return end
+    local key = strlower(botName)
+    NS.botReplyWindow = NS.botReplyWindow or {}
+    NS.botInInventoryBurst = NS.botInInventoryBurst or {}
+    local now = GetTime()
+    local burstDeadline = now + (NS.INVENTORY_BURST_SILENCE or 2.0)
+    NS.botReplyWindow[key] = math.max(NS.botReplyWindow[key] or 0, burstDeadline)
+    NS.botInInventoryBurst[key] = true
+end
+
+-- Incoming: hide a bot's reply while its command-reply window is open (see CB_MarkExpectReply
+-- in Bridge.lua) or during an inventory dump burst (TradeStatusAction::BeginTrade in mod-playerbots).
+-- The window opens when we whisper a command or trade with a bot, and is slid forward on each
+-- matching line, closing once the bot goes quiet. Unsolicited bot greetings (a bot's readiness
+-- whisper, with no command before it) are intentionally NOT hidden.
+local whisperSeen = {}
+local function filterWhisper(_, _, msg, sender)
+    if not enabled() or not suppressibleParty(sender) then return false end
+    local replayKey = (msg or "") .. "\0" .. strlower(sender or "")
+    return replayable(whisperSeen, replayKey, function()
+        local key = strlower(sender)
+        local now = GetTime()
+
+        -- Inventory dump header
+        if msg and msg:match("^===%s*[iI]nventory%s*===") then
+            NS.botReplyWindow = NS.botReplyWindow or {}
+            NS.botInInventoryBurst = NS.botInInventoryBurst or {}
+            NS.botInInventoryBurst[key] = true
+            NS.botReplyWindow[key] = now + (NS.INVENTORY_BURST_SILENCE or 2.0)
+            return true
+        end
+
+        local deadline = NS.botReplyWindow and NS.botReplyWindow[key]
+        if deadline and now < deadline then
+            if NS.botInInventoryBurst and NS.botInInventoryBurst[key] then
+                if isInventoryBurstLine(msg) then
+                    if msg:match("^Discount up to:") then
+                        -- End of burst in random bots
+                        NS.botInInventoryBurst[key] = nil
+                        NS.botReplyWindow[key] = nil
+                    else
+                        NS.botReplyWindow[key] = now + (NS.INVENTORY_BURST_SILENCE or 2.0)
+                    end
+                    return true
+                end
+                return false
+            end
+
+            NS.botReplyWindow[key] = now + NS.WHISPER_SILENCE
+            return true
+        end
+
+        if NS.botInInventoryBurst and NS.botInInventoryBurst[key] then
+            NS.botInInventoryBurst[key] = nil
+        end
+
+        return false
+    end)
 end
 
 -- System: hide the server output CleanBot triggers and already parses — the self-bot
