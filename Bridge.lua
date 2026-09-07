@@ -1153,9 +1153,11 @@ end
 -- otherwise falls back to whisper "s gray".
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
+NS.bulkSellPending = NS.bulkSellPending or {}
 NS.CB_BridgeBulkSell = function(key, botName)
     if CB_EffectiveBridgeState() == "present" then
         local token = CB_NextInvToken("bsell")
+        NS.bulkSellPending[token] = true
         CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~SELL_GREY~0~0")
     else
         NS.CB_SendBotCommand(botName, "s gray")
@@ -2082,17 +2084,29 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
         -- ── Inventory & Item action ACKs ──────────────────────────────────
         elseif msg and strsub(msg, 1, 22) == "INVENTORY_ITEM_ACTION~" then
-            -- INVENTORY_ITEM_ACTION~<botName>~<token>~<action>~<status>~<moved>
+            -- INVENTORY_ITEM_ACTION~<botName>~<token>~<action>~<itemId>~<status>~<reason>~<moved>
             local rest = strsub(msg, 23)
-            local name, r2 = NS.CB_SplitOnce(rest, "~")
-            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local name = CB_UrlDecode(rawName)
+            local token, r3 = NS.CB_SplitOnce(r2, "~")
             local action, r4 = NS.CB_SplitOnce(r3, "~")
-            local status, moved = NS.CB_SplitOnce(r4, "~")
+            local itemId, r5 = NS.CB_SplitOnce(r4, "~")
+            local status, r6 = NS.CB_SplitOnce(r5, "~")
+            local reason, moved = NS.CB_SplitOnce(r6, "~")
             local key = strlower(name)
             local movedCount = tonumber(moved) or 0
+            local isSingleBulk = NS.bulkSellPending and token and NS.bulkSellPending[token]
+            if isSingleBulk then
+                NS.bulkSellPending[token] = nil
+            end
             if status == "OK" then
-                if action == "SELL_GREY" and movedCount > 0 and NS.CB_Print then
-                    NS.CB_Print(string.format("%s: %d grey item(s) sold.", name, movedCount))
+                if action == "SELL_GREY" and movedCount > 0 then
+                    if NS.CB_Print then
+                        NS.CB_Print(string.format("%s: %d grey item(s) sold.", name, movedCount))
+                    end
+                    if isSingleBulk and NS.CB_PlaySellSound then
+                        NS.CB_PlaySellSound()
+                    end
                 end
             end
             local gp = NS.groupSellPending

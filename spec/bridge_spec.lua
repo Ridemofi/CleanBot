@@ -468,6 +468,7 @@ describe("Vendor sell sounds", function()
     before_each(function()
         NS.CB_PlaySellSound = realPlay
         NS.groupSellPending = nil
+        NS.bulkSellPending = {}
         Mock.reset()
         NS.bridgeState = "present"
         NS.debugBridgeOverride = nil
@@ -488,15 +489,44 @@ describe("Vendor sell sounds", function()
         assert.equals(0, sounds)
     end)
 
+    it("plays one coin on single-bot bulk sell OK with items", function()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.CB_BridgeBulkSell("bot", "Bot")
+        assert.equals(1, #Mock.addon)
+        local sentMsg = Mock.addon[1].text
+        local tok = strmatch(sentMsg, "RUN~ITEM_ACTION~Bot~([^~]+)~SELL_GREY")
+        assert.is_not_nil(tok)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~Bot~" .. tok .. "~SELL_GREY~0~OK~OK~3")
+        assert.equals(1, sounds)
+    end)
+
+    it("stays silent on single-bot bulk sell OK with 0 items", function()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.CB_BridgeBulkSell("bot", "Bot")
+        local sentMsg = Mock.addon[1].text
+        local tok = strmatch(sentMsg, "RUN~ITEM_ACTION~Bot~([^~]+)~SELL_GREY")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~Bot~" .. tok .. "~SELL_GREY~0~OK~OK~0")
+        assert.equals(0, sounds)
+    end)
+
+    it("stays silent on single-bot bulk sell ERR", function()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.CB_BridgeBulkSell("bot", "Bot")
+        local sentMsg = Mock.addon[1].text
+        local tok = strmatch(sentMsg, "RUN~ITEM_ACTION~Bot~([^~]+)~SELL_GREY")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~Bot~" .. tok .. "~SELL_GREY~0~ERR~VENDOR_NOT_FOUND~0")
+        assert.equals(0, sounds)
+    end)
+
     it("plays once when every group SELL_GREY reply lands", function()
         Mock.party = 2
         Mock.roster = { party1 = "BotA", party2 = "BotB" }
         CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
         NS.CB_BridgeGroupBulkSell()
         assert.equals(2, #Mock.addon)
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~3")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~0~OK~OK~3")
         assert.equals(0, sounds)
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~2")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~0~OK~OK~2")
         assert.equals(1, sounds)
     end)
 
@@ -505,10 +535,10 @@ describe("Vendor sell sounds", function()
         Mock.roster = { party1 = "BotA", party2 = "BotB" }
         CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
         NS.CB_BridgeGroupBulkSell()
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~3")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~0~OK~OK~3")
         Mock.tick(4.1)
         assert.equals(1, sounds)
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~2")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~0~OK~OK~2")
         assert.equals(1, sounds)
     end)
 
@@ -517,8 +547,8 @@ describe("Vendor sell sounds", function()
         Mock.roster = { party1 = "BotA", party2 = "BotB" }
         CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
         NS.CB_BridgeGroupBulkSell()
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~0")
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~0~OK~OK~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~0~OK~OK~0")
         assert.equals(0, sounds)
     end)
 end)
