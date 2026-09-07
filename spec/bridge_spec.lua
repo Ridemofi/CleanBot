@@ -428,3 +428,36 @@ describe("Loot strategy reply parsing", function()
         assert.is_nil(e.lootStrategy)
     end)
 end)
+
+describe("Bridge single sell (ITEM_SELL)", function()
+    local link = "|cffffffff|Hitem:1234|h[Grey Thing]|h|r"
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        Mock.party = 1
+    end)
+
+    it("sends RUN~ITEM_SELL with exact coordinates when present", function()
+        local cell = { bag = 0, slot = 5, itemId = 1234, count = 2, itemLink = link }
+        assert.is_true(NS.CB_BridgeSellItem("bot", "Bot", link, cell))
+        assert.equals(1, #Mock.addon)
+        assert.is_true(Mock.addon[1].text:find("RUN~ITEM_SELL~Bot~", 1, true) == 1)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("returns false without coordinates when present (no whisper fallback)", function()
+        assert.is_false(NS.CB_BridgeSellItem("bot", "Bot", link, {}))
+        assert.equals(0, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("whispers s <link> when bridge is absent", function()
+        NS.bridgeState = "absent"
+        local cell = { bag = 0, slot = 5, itemId = 1234, count = 1, itemLink = link }
+        assert.is_true(NS.CB_BridgeSellItem("bot", "Bot", link, cell))
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+    end)
+end)

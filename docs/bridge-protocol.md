@@ -72,6 +72,15 @@ Allowlists mirror the server's `IsAllowed*()` checks — keep `Bridge.lua` in sy
 | `LOOT` | `nc +loot`, `nc -loot`, `ll all/normal/gray/quest/skill` | Case-sensitive on the server |
 | `RTI` | `rti <icon>`, `rti cc <icon>` (STAR/CIRCLE/DIAMOND/TRIANGLE/MOON/SQUARE/CROSS/SKULL), `attack rti target`, `pull rti target` | Allowlisted plumbing — no CleanBot UI sends these yet |
 
+### Inventory actions — direct `RUN~ITEM_*` opcodes
+
+Not routed via `CB_SendBotCommand`; sent with exact bag/slot coordinates when bridge is `present`:
+
+| Packet | Capability | Reply | Notes |
+|---|---|---|---|
+| `RUN~ITEM_ACTION~<bot>~<token>~SELL_GREY~0~0` | `INVENTORY_BULK_SELL_V1` | `INVENTORY_ITEM_ACTION~<bot>~<token>~SELL_GREY~<OK/ERR>~<moved>` | Bulk "Sell Trash" (`CB_BridgeBulkSell` / `CB_BridgeGroupBulkSell`); whisper `s gray` fallback |
+| `RUN~ITEM_SELL~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_SELL_SINGLE_V1` | `INVENTORY_ITEM_SELL~<bot>~<token>~<OK/ERR>~<reason>~<bag>~<slot>~<itemId>~<sold>` | Single-item vendor sell (`CB_BridgeSellItem`, wired into `CB_DoSell`); whisper `s <link>` fallback when absent |
+
 Queries (`co ?`, `nc ?`, `items`, `quests all`, `stats`, `talents spec list`) are never
 allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual.
 

@@ -330,15 +330,22 @@ KINDS.bank.menu      = CB_ShowBankMenu
 local function CB_DoSell(cell, key, entry)
     local link = cell.itemLink
     if not link then return end
-    NS.CB_SendBotCommand(entry.name, "s " .. NS.CB_CleanItemLink(link))
+    local sent = false
+    if NS.CB_BridgeSellItem then
+        sent = NS.CB_BridgeSellItem(key, entry.name, link, cell)
+    else
+        NS.CB_SendBotCommand(entry.name, "s " .. NS.CB_CleanItemLink(link))
+        NS.CB_ScheduleReconcile(key, entry.name)
+        sent = true
+    end
+    if not sent then return end
     -- Optimistic update: a vendor sale clears the whole stack — blank the cell now (mirrors the
-    -- right-click "Use" path), then reconcile against the bot's real bags.
+    -- right-click "Use" path). The reconcile was already scheduled by CB_BridgeSellItem.
     cell.icon:Hide()
     cell.countText:Hide()
     cell.itemLink = nil
     NS.CB_ClearQualityBorder(cell)
     NS.CB_SetRarityOverlay(cell, nil)
-    NS.CB_ScheduleReconcile(key, entry.name)
 end
 
 local function CB_EnsureSellPopup()

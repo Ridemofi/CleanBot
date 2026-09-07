@@ -1268,6 +1268,31 @@ NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
     end
 end
 
+-- Sells a single item at a vendor. Uses ITEM_SELL if exact bag/slot coordinates
+-- are available, otherwise falls back to whisper "s <link>".
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+---@param link    string Item link.
+---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
+NS.CB_BridgeSellItem = function(key, botName, link, cell)
+    if CB_EffectiveBridgeState() == "present" then
+        local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+        if hasExact then
+            local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+            local count = cell.count or 1
+            local token = CB_NextInvToken("sell")
+            CB_SendBridge("RUN~ITEM_SELL~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            NS.CB_ScheduleReconcile(key, botName)
+            return true
+        end
+        return false
+    else
+        NS.CB_SendBotCommand(botName, "s " .. NS.CB_CleanItemLink(link))
+        NS.CB_ScheduleReconcile(key, botName)
+        return true
+    end
+end
+
 -- Deposits an item to personal bank or guild bank via ITEM_DEPOSIT_EXACT_V1 if exact
 -- bag/slot coordinates are available and Bridge is active. Returns true if sent via Bridge,
 -- false if caller should fall back to whisper.
@@ -2064,6 +2089,16 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
         elseif msg and strsub(msg, 1, 23) == "INVENTORY_ITEM_DESTROY~" then
             local rest = strsub(msg, 24)
+            local name, r2 = NS.CB_SplitOnce(rest, "~")
+            local _, r3 = NS.CB_SplitOnce(r2, "~")
+            local status = NS.CB_SplitOnce(r3, "~")
+            local key = strlower(name)
+            if status ~= "OK" then
+                NS.CB_ScheduleReconcile(key, name)
+            end
+
+        elseif msg and strsub(msg, 1, 20) == "INVENTORY_ITEM_SELL~" then
+            local rest = strsub(msg, 21)
             local name, r2 = NS.CB_SplitOnce(rest, "~")
             local _, r3 = NS.CB_SplitOnce(r2, "~")
             local status = NS.CB_SplitOnce(r3, "~")
