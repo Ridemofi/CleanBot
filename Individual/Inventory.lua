@@ -170,28 +170,32 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
+                local sent = false
                 if NS.CB_BridgeUseItem then
-                    NS.CB_BridgeUseItem(key, entry.name, cell.itemLink, cell)
+                    sent = NS.CB_BridgeUseItem(key, entry.name, cell.itemLink, cell)
                 else
                     NS.CB_SendBotCommand(entry.name, "u " .. NS.CB_CleanItemLink(cell.itemLink))
                     NS.CB_ScheduleReconcile(key, entry.name)
+                    sent = true
                 end
-                -- Optimistic update: decrement stack or clear cell immediately.
-                -- IsShown gate: a hidden countText still holds the previous occupant's number.
-                local curCount = cell.countText:IsShown() and tonumber(cell.countText:GetText()) or 1
-                if curCount > 1 then
-                    cell.countText:SetText(curCount - 1)
-                    cell.count = curCount - 1
-                else
-                    cell.icon:Hide()
-                    cell.countText:Hide()
-                    cell.itemLink = nil
-                    cell.bag = nil
-                    cell.slot = nil
-                    cell.itemId = nil
-                    cell.count = nil
-                    NS.CB_ClearQualityBorder(cell)
-                    NS.CB_SetRarityOverlay(cell, nil)
+                if sent then
+                    -- Optimistic update: decrement stack or clear cell immediately.
+                    -- IsShown gate: a hidden countText still holds the previous occupant's number.
+                    local curCount = cell.countText:IsShown() and tonumber(cell.countText:GetText()) or 1
+                    if curCount > 1 then
+                        cell.countText:SetText(curCount - 1)
+                        cell.count = curCount - 1
+                    else
+                        cell.icon:Hide()
+                        cell.countText:Hide()
+                        cell.itemLink = nil
+                        cell.bag = nil
+                        cell.slot = nil
+                        cell.itemId = nil
+                        cell.count = nil
+                        NS.CB_ClearQualityBorder(cell)
+                        NS.CB_SetRarityOverlay(cell, nil)
+                    end
                 end
             end
             UIDropDownMenu_AddButton(info)
@@ -222,22 +226,27 @@ local function CB_ShowInvMenu(cell, key)
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
-                local bridgeSent = NS.CB_BridgeDepositItem and NS.CB_BridgeDepositItem(entry.name, "GBANK_DEPOSIT", cell)
-                if not bridgeSent then
+                local sent = false
+                if NS.CB_EffectiveBridgeState and NS.CB_EffectiveBridgeState() == "present" then
+                    if NS.CB_BridgeDepositItem then
+                        sent = NS.CB_BridgeDepositItem(entry.name, "GBANK_DEPOSIT", cell)
+                    end
+                else
                     NS.CB_SendBotCommand(entry.name, "guild bank " .. NS.CB_CleanItemLink(cell.itemLink))
+                    NS.CB_ScheduleReconcile(key, entry.name)
+                    sent = true
                 end
                 -- Optimistic clear (mirrors Use/Sell); reconcile restores the cell on failure.
-                cell.icon:Hide()
-                cell.countText:Hide()
-                cell.itemLink = nil
-                cell.bag = nil
-                cell.slot = nil
-                cell.itemId = nil
-                cell.count = nil
-                NS.CB_ClearQualityBorder(cell)
-                NS.CB_SetRarityOverlay(cell, nil)
-                if not bridgeSent then
-                    NS.CB_ScheduleReconcile(key, entry.name)
+                if sent then
+                    cell.icon:Hide()
+                    cell.countText:Hide()
+                    cell.itemLink = nil
+                    cell.bag = nil
+                    cell.slot = nil
+                    cell.itemId = nil
+                    cell.count = nil
+                    NS.CB_ClearQualityBorder(cell)
+                    NS.CB_SetRarityOverlay(cell, nil)
                 end
             end
             UIDropDownMenu_AddButton(info)
@@ -248,21 +257,25 @@ local function CB_ShowInvMenu(cell, key)
         info.func = function ()
             local entry = CleanBot_PartyBots[key]
             if not entry then return end
+            local sent = false
             if NS.CB_BridgeDestroyItem then
-                NS.CB_BridgeDestroyItem(key, entry.name, cell.itemLink, cell)
+                sent = NS.CB_BridgeDestroyItem(key, entry.name, cell.itemLink, cell)
             else
                 NS.CB_SendBotCommand(entry.name, "destroy " .. NS.CB_CleanItemLink(cell.itemLink))
                 NS.CB_ScheduleReconcile(key, entry.name)
+                sent = true
             end
-            cell.icon:Hide()
-            cell.countText:Hide()
-            cell.itemLink = nil
-            cell.bag = nil
-            cell.slot = nil
-            cell.itemId = nil
-            cell.count = nil
-            NS.CB_ClearQualityBorder(cell)
-            NS.CB_SetRarityOverlay(cell, nil)
+            if sent then
+                cell.icon:Hide()
+                cell.countText:Hide()
+                cell.itemLink = nil
+                cell.bag = nil
+                cell.slot = nil
+                cell.itemId = nil
+                cell.count = nil
+                NS.CB_ClearQualityBorder(cell)
+                NS.CB_SetRarityOverlay(cell, nil)
+            end
         end
         UIDropDownMenu_AddButton(info)
 
@@ -432,12 +445,14 @@ end
 ---@param srcCell  table?  The cell the item is moving out of (for the eager update).
 ---@param destCell table?  The exact destination cell (a drag target), if any.
 NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
-    local bridgeSent = false
-    if dir == "deposit" and NS.CB_BridgeDepositItem then
-        bridgeSent = NS.CB_BridgeDepositItem(botName, "BANK_DEPOSIT", srcCell)
-    end
+    local isBridge = NS.CB_EffectiveBridgeState and (NS.CB_EffectiveBridgeState() == "present")
+    local sent = false
 
-    if not bridgeSent then
+    if dir == "deposit" and isBridge then
+        if NS.CB_BridgeDepositItem then
+            sent = NS.CB_BridgeDepositItem(botName, "BANK_DEPOSIT", srcCell)
+        end
+    else
         local prefix = (dir == "withdraw") and "bank -" or "bank "
         local cmd    = prefix .. NS.CB_CleanItemLink(link)
         NS.CB_EnqueueRequest(key, function()
@@ -445,15 +460,15 @@ NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
             if e then e.awaitingBankOp = true; e.bankOpTimeout = 0 end
             NS.CB_SendBotCommandRaw(botName, cmd)  -- already running from the queue
         end)
+        NS.CB_ScheduleReconcile(key, botName)
+        sent = true
     end
 
     -- Eager move (immediate, regardless of queue position): withdraw lands in the
     -- inventory grid, deposit in the bank grid.
-    local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
-    CB_OptimisticMove(srcCell, destFrame, destCell)
-
-    if not bridgeSent then
-        NS.CB_ScheduleReconcile(key, botName)
+    if sent then
+        local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
+        CB_OptimisticMove(srcCell, destFrame, destCell)
     end
 end
 

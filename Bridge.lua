@@ -336,6 +336,7 @@ end
 local function CB_EffectiveBridgeState()
     return NS.debugBridgeOverride or NS.bridgeState
 end
+NS.CB_EffectiveBridgeState = CB_EffectiveBridgeState
 
 -- Sends a bridge addon packet on the correct channel:
 --   • In a raid  → "RAID"   ("PARTY" does not reach raid members)
@@ -1135,7 +1136,7 @@ end
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 NS.CB_BridgeBulkSell = function(key, botName)
-    if CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["INVENTORY_BULK_SELL_V1"] then
+    if CB_EffectiveBridgeState() == "present" then
         local token = CB_NextInvToken("bsell")
         CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~SELL_GREY~0~0")
     else
@@ -1147,7 +1148,7 @@ end
 -- Sells all gray items for every bot in the group. Uses INVENTORY_BULK_SELL_V1 if available,
 -- otherwise broadcasts "s gray" to the group.
 NS.CB_BridgeGroupBulkSell = function()
-    if CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["INVENTORY_BULK_SELL_V1"] then
+    if CB_EffectiveBridgeState() == "present" then
         if NS.CB_ForEachGroupMember then
             NS.CB_ForEachGroupMember(function(_, name)
                 local key = name and strlower(name)
@@ -1182,26 +1183,39 @@ end
 ---@param link    string Item link.
 ---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
 NS.CB_BridgeEquipItem = function(key, botName, link, cell)
-    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
-    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_EQUIP_V1"] then
-        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
-        local count = cell.count or 1
-        local token = CB_NextInvToken("equip")
-        CB_SendBridge("RUN~ITEM_EQUIP~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    if CB_EffectiveBridgeState() == "present" then
+        local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+        if hasExact then
+            local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+            local count = cell.count or 1
+            local token = CB_NextInvToken("equip")
+            CB_SendBridge("RUN~ITEM_EQUIP~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            NS.CB_After(1.5, function()
+                NS.CB_FetchInventory(key, botName)
+                if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
+                    for _, info in ipairs(NS.tabList) do
+                        if info.key == key and info.unit then
+                            NS.CB_QueueEquipRefresh({ { key = key, unit = info.unit } })
+                            break
+                        end
+                    end
+                end
+            end)
+        end
     else
         NS.CB_SendBotCommand(botName, "e " .. NS.CB_CleanItemLink(link))
-    end
-    NS.CB_After(1.5, function()
-        NS.CB_FetchInventory(key, botName)
-        if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
-            for _, info in ipairs(NS.tabList) do
-                if info.key == key and info.unit then
-                    NS.CB_QueueEquipRefresh({ { key = key, unit = info.unit } })
-                    break
+        NS.CB_After(1.5, function()
+            NS.CB_FetchInventory(key, botName)
+            if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
+                for _, info in ipairs(NS.tabList) do
+                    if info.key == key and info.unit then
+                        NS.CB_QueueEquipRefresh({ { key = key, unit = info.unit } })
+                        break
+                    end
                 end
             end
-        end
-    end)
+        end)
+    end
 end
 
 -- Uses an item (consumable). Uses ITEM_USE_V1 if exact bag/slot coordinates are available,
@@ -1211,16 +1225,22 @@ end
 ---@param link    string Item link.
 ---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
 NS.CB_BridgeUseItem = function(key, botName, link, cell)
-    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
-    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_USE_V1"] then
-        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
-        local count = cell.count or 1
-        local token = CB_NextInvToken("use")
-        CB_SendBridge("RUN~ITEM_USE~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    if CB_EffectiveBridgeState() == "present" then
+        local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+        if hasExact then
+            local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+            local count = cell.count or 1
+            local token = CB_NextInvToken("use")
+            CB_SendBridge("RUN~ITEM_USE~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            NS.CB_ScheduleReconcile(key, botName)
+            return true
+        end
+        return false
     else
         NS.CB_SendBotCommand(botName, "u " .. NS.CB_CleanItemLink(link))
+        NS.CB_ScheduleReconcile(key, botName)
+        return true
     end
-    NS.CB_ScheduleReconcile(key, botName)
 end
 
 -- Destroys an item. Uses ITEM_DESTROY_V1 if exact bag/slot coordinates are available,
@@ -1230,16 +1250,22 @@ end
 ---@param link    string Item link.
 ---@param cell    table? Inventory cell (carries bag/slot if exact coordinates are available).
 NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
-    local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
-    if hasExact and CB_EffectiveBridgeState() == "present" and NS.capabilities and NS.capabilities["ITEM_DESTROY_V1"] then
-        local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
-        local count = cell.count or 1
-        local token = CB_NextInvToken("destroy")
-        CB_SendBridge("RUN~ITEM_DESTROY~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    if CB_EffectiveBridgeState() == "present" then
+        local hasExact = cell and cell.bag ~= nil and cell.slot ~= nil
+        if hasExact then
+            local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
+            local count = cell.count or 1
+            local token = CB_NextInvToken("destroy")
+            CB_SendBridge("RUN~ITEM_DESTROY~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            NS.CB_ScheduleReconcile(key, botName)
+            return true
+        end
+        return false
     else
         NS.CB_SendBotCommand(botName, "destroy " .. NS.CB_CleanItemLink(link))
+        NS.CB_ScheduleReconcile(key, botName)
+        return true
     end
-    NS.CB_ScheduleReconcile(key, botName)
 end
 
 -- Deposits an item to personal bank or guild bank via ITEM_DEPOSIT_EXACT_V1 if exact
@@ -1251,7 +1277,6 @@ end
 ---@return boolean sentViaBridge
 NS.CB_BridgeDepositItem = function(botName, action, cell)
     if CB_EffectiveBridgeState() ~= "present" then return false end
-    if not (NS.capabilities and NS.capabilities["ITEM_DEPOSIT_EXACT_V1"]) then return false end
     if not cell or cell.bag == nil or cell.slot == nil then return false end
     local itemId = cell.itemId or tonumber(strmatch(cell.itemLink or "", "item:(%d+)")) or 0
     if itemId <= 0 then return false end
