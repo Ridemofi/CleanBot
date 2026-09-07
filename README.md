@@ -7,7 +7,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 - Fully Skinned for [ElvUI](https://github.com/ElvUI-WotLK/ElvUI/tree/master) or the default UI
     - Automatically Switches
 - Compatible Optional Extras:
-    - [Multibot Bridge Server Module](https://github.com/Wishmaster117/mod-multibot-bridge) - Removes some of the whisper spam and speeds up query/action time
+    - [Multibot Bridge Server Module](https://github.com/Wishmaster117/mod-multibot-bridge) *(Recommended)* - Removes some of the whisper spam and speeds up query/action time
     - [Talented](https://warperia.com/addon-wotlk/talented/) - Opens the large three panel talent tree for bots
 
 # Manage Tab

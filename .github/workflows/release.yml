@@ -54,6 +54,7 @@ jobs:
             --exclude='spec' \
             --exclude='dist' \
             --exclude='CHANGELOG.md' \
+            --exclude='*.bat' \
             ./ dist/CleanBot/
 
       - name: Create zip
