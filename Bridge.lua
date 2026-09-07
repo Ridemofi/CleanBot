@@ -1131,6 +1131,24 @@ NS.CB_RequestInventory = function(key, botName, anchor)
     NS.CB_ToggleInventory(key, botName, anchor)
 end
 
+-- Vendor sell coin sound. Wrapped so specs can stub it (no PlaySound in tests).
+NS.CB_PlaySellSound = function()
+    if type(PlaySound) == "function" then PlaySound(120) end
+end
+
+-- Aggregated group-sell transaction: a single coin once every expected SELL_GREY
+-- reply lands (or the timeout fires), and only if at least one bot sold anything.
+NS.groupSellPending = nil
+local groupSellGen = 0
+local function CB_GroupSellFinalize(gen)
+    local p = NS.groupSellPending
+    if not p or p.gen ~= gen then return end
+    NS.groupSellPending = nil
+    if (p.soldTotal or 0) > 0 then
+        if NS.CB_PlaySellSound then NS.CB_PlaySellSound() end
+    end
+end
+
 -- Sells all gray items for a single bot. Uses INVENTORY_BULK_SELL_V1 if available,
 -- otherwise falls back to whisper "s gray".
 ---@param key     string Bot name-key.
@@ -1149,22 +1167,34 @@ end
 -- otherwise broadcasts "s gray" to the group.
 NS.CB_BridgeGroupBulkSell = function()
     if CB_EffectiveBridgeState() == "present" then
+        groupSellGen = groupSellGen + 1
+        local pending = { gen = groupSellGen, expected = {}, received = 0, soldTotal = 0 }
+        NS.groupSellPending = pending
+        local function addBot(key, name)
+            pending.expected[key] = true
+            local token = CB_NextInvToken("gbsell")
+            CB_SendBridge("RUN~ITEM_ACTION~" .. name .. "~" .. token .. "~SELL_GREY~0~0")
+        end
         if NS.CB_ForEachGroupMember then
             NS.CB_ForEachGroupMember(function(_, name)
                 local key = name and strlower(name)
-                if key and CleanBot_PartyBots[key] then
-                    local token = CB_NextInvToken("gbsell")
-                    CB_SendBridge("RUN~ITEM_ACTION~" .. name .. "~" .. token .. "~SELL_GREY~0~0")
-                end
+                if key and CleanBot_PartyBots[key] then addBot(key, name) end
             end)
         else
             for key, entry in pairs(CleanBot_PartyBots) do
                 if entry and entry.name then
-                    local token = CB_NextInvToken("gbsell")
-                    CB_SendBridge("RUN~ITEM_ACTION~" .. entry.name .. "~" .. token .. "~SELL_GREY~0~0")
+                    addBot(key, entry.name)
                 end
             end
         end
+        local empty = true
+        for _ in pairs(pending.expected) do empty = false; break end
+        if empty then
+            NS.groupSellPending = nil
+            return
+        end
+        local gen = pending.gen
+        NS.CB_After(4, function() CB_GroupSellFinalize(gen) end)
     else
         NS.CB_SendGroupCommand("s gray")
         if NS.CB_ForEachGroupMember and NS.CB_ScheduleReconcile then
@@ -2065,6 +2095,15 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                     NS.CB_Print(string.format("%s: %d grey item(s) sold.", name, movedCount))
                 end
             end
+            local gp = NS.groupSellPending
+            if gp and action == "SELL_GREY" and gp.expected and gp.expected[key] then
+                gp.expected[key] = nil
+                gp.received = (gp.received or 0) + 1
+                if status == "OK" then gp.soldTotal = (gp.soldTotal or 0) + movedCount end
+                local remaining = false
+                for _ in pairs(gp.expected) do remaining = true; break end
+                if not remaining then CB_GroupSellFinalize(gp.gen) end
+            end
             NS.CB_ScheduleReconcile(key, name)
 
         elseif msg and strsub(msg, 1, 21) == "INVENTORY_ITEM_EQUIP~" then
@@ -2103,7 +2142,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local _, r3 = NS.CB_SplitOnce(r2, "~")
             local status = NS.CB_SplitOnce(r3, "~")
             local key = strlower(name)
-            if status ~= "OK" then
+            if status == "OK" then
+                if NS.CB_PlaySellSound then NS.CB_PlaySellSound() end
+            else
                 NS.CB_ScheduleReconcile(key, name)
             end
 

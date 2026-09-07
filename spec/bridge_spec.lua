@@ -461,3 +461,64 @@ describe("Bridge single sell (ITEM_SELL)", function()
         assert.equals(1, #Mock.whispers)
     end)
 end)
+
+describe("Vendor sell sounds", function()
+    local realPlay = NS.CB_PlaySellSound
+    local sounds
+    before_each(function()
+        NS.CB_PlaySellSound = realPlay
+        NS.groupSellPending = nil
+        Mock.reset()
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        Mock.party = 1
+        sounds = 0
+        NS.CB_PlaySellSound = function() sounds = sounds + 1 end
+    end)
+
+    it("plays one coin on single-sell OK", function()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_SELL~Bot~tok1~OK~OK~0~5~1234~1")
+        assert.equals(1, sounds)
+    end)
+
+    it("stays silent on single-sell ERR", function()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_SELL~Bot~tok1~ERR~VENDOR_NOT_FOUND~0~5~1234~0")
+        assert.equals(0, sounds)
+    end)
+
+    it("plays once when every group SELL_GREY reply lands", function()
+        Mock.party = 2
+        Mock.roster = { party1 = "BotA", party2 = "BotB" }
+        CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
+        NS.CB_BridgeGroupBulkSell()
+        assert.equals(2, #Mock.addon)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~3")
+        assert.equals(0, sounds)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~2")
+        assert.equals(1, sounds)
+    end)
+
+    it("plays once on timeout with partial replies and ignores late stragglers", function()
+        Mock.party = 2
+        Mock.roster = { party1 = "BotA", party2 = "BotB" }
+        CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
+        NS.CB_BridgeGroupBulkSell()
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~3")
+        Mock.tick(4.1)
+        assert.equals(1, sounds)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~2")
+        assert.equals(1, sounds)
+    end)
+
+    it("stays silent when nobody sold anything", function()
+        Mock.party = 2
+        Mock.roster = { party1 = "BotA", party2 = "BotB" }
+        CleanBot_PartyBots = { bota = { name = "BotA" }, botb = { name = "BotB" } }
+        NS.CB_BridgeGroupBulkSell()
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotA~t1~SELL_GREY~OK~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~BotB~t2~SELL_GREY~OK~0")
+        assert.equals(0, sounds)
+    end)
+end)
