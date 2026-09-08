@@ -856,9 +856,27 @@ NS.CleanBot_BuildSettingsTab = function()
         if NS.CB_RefreshRecruiter then NS.CB_RefreshRecruiter() end
     end)
 
+    -- ── Quest Rewards (QuestReward.lua) ────────────────────────
+    local questHeader = NS.CB_CreateHeader(otherChild, "Quest Rewards")
+    NS.CB_AnchorBelow(questHeader, recruiterCB)
+
+    local QUEST_REWARD_TOOLTIP = "When enabled, CleanBot shows a window during quest completion allowing manual selection of quest rewards for party bots.\n\n|cffff2020Server Requirement:|r\nRequires 'AiPlayerbot.AutoPickReward = no' in aiplayerbot.conf.\nIf left on 'yes', bots claim rewards automatically and manual selection will fail."
+    local questRewardCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotQuestRewardCB", "Enable Bot Quest Reward Selection", QUEST_REWARD_TOOLTIP)
+    questRewardCB:SetChecked(NS.questRewardEnabled == true)
+    NS.CB_AnchorBelow(questRewardCB, questHeader)
+    questRewardCB:SetScript("OnClick", function(self)
+        local checked = self:GetChecked() and true or false
+        self:SetChecked(checked)
+        NS.questRewardEnabled = checked
+        CleanBot_SavedVars.questRewardEnabled = checked
+        if not checked and NS.CB_HideQuestRewardFrame then
+            NS.CB_HideQuestRewardFrame()
+        end
+    end)
+
     -- ── Action Bar section (mirrors the minimap right-click toggles) ────
     local actionBarHeader = NS.CB_CreateHeader(otherChild, "Action Bar")
-    NS.CB_AnchorBelow(actionBarHeader, recruiterCB)
+    NS.CB_AnchorBelow(actionBarHeader, questRewardCB)
 
     local actionBarCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotActionBarCB", "Show Action Bar",
         "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")

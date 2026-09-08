@@ -559,6 +559,11 @@ local function CB_HideRewardFrame()
 end
 
 local function CB_CheckAndShowRewards()
+    if not NS.questRewardEnabled then
+        CB_HideRewardFrame()
+        return
+    end
+
     if not CB_HasBots() then
         CB_HideRewardFrame()
         return
@@ -587,6 +592,7 @@ local function CB_CheckAndShowRewards()
 end
 
 local function CB_OnQuestComplete()
+    if not NS.questRewardEnabled then return end
     -- Only trigger if the quest dialog has choices to select from
     retryCount = 0
     CB_CheckAndShowRewards()
@@ -626,3 +632,5 @@ if QuestFrame and QuestFrame.HookScript then
         CB_HideRewardFrame()
     end)
 end
+
+NS.CB_HideQuestRewardFrame = CB_HideRewardFrame
