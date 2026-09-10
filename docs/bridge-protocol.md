@@ -74,15 +74,19 @@ Allowlists mirror the server's `IsAllowed*()` checks — keep `Bridge.lua` in sy
 
 ### Inventory actions — direct `RUN~ITEM_*` opcodes
 
-Not routed via `CB_SendBotCommand`; sent with exact bag/slot coordinates when bridge is `present`:
+Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot coordinates, whisper only when `absent`:
 
 | Packet | Capability | Reply | Notes |
 |---|---|---|---|
-| `RUN~ITEM_ACTION~<bot>~<token>~SELL_GREY~0~0` | `INVENTORY_BULK_SELL_V1` | `INVENTORY_ITEM_ACTION~<bot>~<token>~SELL_GREY~<itemId>~<OK/ERR>~<reason>~<moved>` | Bulk "Sell Trash" (`CB_BridgeBulkSell` / `CB_BridgeGroupBulkSell`); whisper `s gray` fallback |
-| `RUN~ITEM_SELL~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_SELL_SINGLE_V1` | `INVENTORY_ITEM_SELL~<bot>~<token>~<OK/ERR>~<reason>~<bag>~<slot>~<itemId>~<sold>` | Single-item vendor sell (`CB_BridgeSellItem`, wired into `CB_DoSell`); whisper `s <link>` fallback when absent |
+| `RUN~ITEM_ACTION~<bot>~<token>~SELL_GREY~0~0` | `INVENTORY_BULK_SELL_V1` | `INVENTORY_ITEM_ACTION~<bot>~<token>~SELL_GREY~<itemId>~<OK/ERR>~<reason>~<moved>` | Bulk "Sell Trash" (`CB_BridgeBulkSell` / `CB_BridgeGroupBulkSell`); whisper `s gray` only when absent |
+| `RUN~ITEM_SELL~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_SELL_SINGLE_V1` | `INVENTORY_ITEM_SELL~<bot>~<token>~<OK/ERR>~<reason>~<bag>~<slot>~<itemId>~<sold>` | Single-item vendor sell (`CB_BridgeSellItem`, wired into `CB_DoSell`); whisper `s <link>` only when absent |
+| `RUN~ITEM_EQUIP~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_EQUIP_V1` | `INVENTORY_ITEM_EQUIP~` | Equip (`CB_BridgeEquipItem`); whisper `e <link>` only when absent |
+| `RUN~ITEM_USE~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_USE_V1` | `INVENTORY_ITEM_USE~` | Use (`CB_BridgeUseItem`); whisper `u <link>` only when absent |
+| `RUN~ITEM_DESTROY~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_DESTROY_V1` | `INVENTORY_ITEM_DESTROY~` | Destroy (`CB_BridgeDestroyItem`); whisper `destroy <link>` only when absent |
+| `RUN~ITEM_DEPOSIT_EXACT~<bot>~<token>~BANK_DEPOSIT\|GBANK_DEPOSIT~<bag>~<slot>~<itemId>~<count>` | `ITEM_DEPOSIT_EXACT_V1` | `ITEM_DEPOSIT_EXACT~` | Deposit to personal / guild bank (`CB_BridgeDepositItem`); whisper `bank <link>` / `guild bank <link>` only when absent |
 
-Queries (`co ?`, `nc ?`, `items`, `quests all`, `stats`, `talents spec list`) are never
-allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual.
+Queries (`co ?`, `nc ?`, `stats`, `formation ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` when bridge is absent) are never
+allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. `stats` always whispers even when bridge is present.
 
 ### Queries — `GET~`
 
@@ -93,6 +97,9 @@ allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISP
 | `GET~STATES~<token>` | Framed strategy snapshot (`STATE_FRAMING_V1` capable) | `STATES_BEGIN~` / `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATES_END~` / `STATE_ABORT~` |
 | `GET~STATES` | Per-bot strategy snapshot (legacy fallback) | `STATE~` |
 | `GET~INVENTORY~<botName>~inv` | Bot's bag contents + money | `INV_BEGIN~` / `INV_SUMMARY~` / `INV_ITEM~` / `INV_END~` |
+| `GET~INVENTORY_EXACT~<botName>~<token>` | Bot's bag contents with exact coordinates (`INVENTORY_EXACT_V1`) | `INV_EXACT_BEGIN~` / `INV_BAG~` / `INV_ITEM_LOC~` / `INV_EXACT_END~` |
+| `GET~BANK~<botName>~<token>` | Bot's bank contents | `BANK_BEGIN~` / `BANK_ITEM~` / `BANK_ERROR~` / `BANK_END~` |
+| `GET~SPELLBOOK~<botName>~<token>` | Bot's spellbook | `SB_BEGIN~` / `SB_ITEM~` / `SB_END~` (`SPELLBOOK_*` alias) |
 | `GET~QUESTS~ALL~<botName>~quests` | Bot's quest log | `QUESTS_BEGIN~` / `QUESTS_ITEM~` / `QUESTS_END~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
@@ -127,6 +134,23 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | `QUESTS_BEGIN~<name>~<token>~<mode>` | — | Resets `entry.quests` |
 | `QUESTS_ITEM~<name>~<token>~<mode>~<status>~<questID>~<questName>` | status `C`/`I`; name URL-encoded — but the current bridge fills it with the questID again (`SendQuestPacketsForBot`) | Appended as `{ id, status, name }`; `name` kept only when the field differs from the id (a real title), since quest Abandon must drop by title |
 | `QUESTS_END~<name>~<token>~<mode>` | — | Renders if the quest frame is open |
+| `INV_EXACT_BEGIN~<name>~<token>` | — | Resets exact inventory staging |
+| `INV_BAG~<name>~<token>~<kind>~<bag>~<slotStart>~<slotCount>~<bagItemId>` | bag layout | Accumulates exact bag totals |
+| `INV_ITEM_LOC~<name>~<token>~<bag>~<slot>~<itemId>~<count>~<soulbound>` | one item with coordinates | Staged with bag/slot/itemId |
+| `INV_EXACT_END~<name>~<token>` | — | Finalizes exact inventory and renders |
+| `BANK_BEGIN~<name>~<token>` | — | Resets bank staging |
+| `BANK_ITEM~<name>~<token>~<item>` | one bank item | Staged into bank list |
+| `BANK_ERROR~<name>~<token>~<reason>` | error reason | Surfaces banker / guild-bank popup |
+| `BANK_END~<name>~<token>` | — | Finalizes bank list and renders |
+| `SB_BEGIN~<name>~<token>` (`SPELLBOOK_BEGIN~` alias) | — | Resets spellbook staging |
+| `SB_ITEM~<name>~<token>~<spell>` (`SPELLBOOK_ITEM~` alias) | one spell | Staged into spellbook list |
+| `SB_END~<name>~<token>` (`SPELLBOOK_END~` alias) | — | Sorts and renders spellbook |
+| `INVENTORY_ITEM_ACTION~<bot>~<token>~SELL_GREY~<itemId>~<OK/ERR>~<reason>~<moved>` | bulk-sell result | Aggregates group-sell totals |
+| `INVENTORY_ITEM_SELL~<bot>~<token>~<OK/ERR>~<reason>~<bag>~<slot>~<itemId>~<sold>` | single-sell result | Reconciles inventory |
+| `INVENTORY_ITEM_EQUIP~<bot>~<token>~<OK/ERR>~<reason>` | equip result | Refreshes inventory and paperdoll |
+| `INVENTORY_ITEM_USE~<bot>~<token>~<OK/ERR>~<reason>` | use result | Reconciles inventory |
+| `INVENTORY_ITEM_DESTROY~<bot>~<token>~<OK/ERR>~<reason>` | destroy result | Reconciles inventory |
+| `ITEM_DEPOSIT_EXACT~<bot>~<token>~<status>~<reason>~<action>~<bag>~<slot>~<itemId>~<count>~<moved>` | deposit result | Reconciles inventory and bank |
 
 ---
 

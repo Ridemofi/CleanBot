@@ -26,8 +26,14 @@ if [ -z "$LUA" ]; then
 fi
 
 echo "pre-push: running unit tests…"
-if "$LUA" spec/run.lua; then
-    exit 0
+if ! "$LUA" spec/run.lua; then
+    echo "pre-push: tests FAILED — push aborted. Fix them, or override with 'git push --no-verify'." >&2
+    exit 1
 fi
-echo "pre-push: tests FAILED — push aborted. Fix them, or override with 'git push --no-verify'." >&2
-exit 1
+
+# Refresh local code graph (fail-open: never blocks the push).
+if command -v graphify >/dev/null 2>&1; then
+    echo "pre-push: refreshing graphify graph…"
+    graphify update . || echo "pre-push: graphify update failed — continuing push." >&2
+fi
+exit 0

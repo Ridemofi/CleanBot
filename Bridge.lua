@@ -1027,8 +1027,8 @@ NS.CB_FetchLootStrategy = function(entry, force)
     NS.CB_SendBotCommand(entry.name, "ll ?")
 end
 
--- Fetches a bot's bank contents. Whisper-only — bank has no bridge packet, and the
--- reply (header "=== Bank ===" then item lines) is collected via the header-routed
+-- Fetches a bot's bank contents. List via GET~BANK when bridge is present, otherwise whisper "bank", and the
+-- whisper reply (header "=== Bank ===" then item lines) is collected via the header-routed
 -- staging branch in CHAT_MSG_WHISPER and finalized by the silence tick. The reply
 -- carries no money/slot summary, so there is no stats fetch. Needs a banker NPC near
 -- the bot; otherwise the bot replies "Cannot find banker nearby" (handled as a popup).
@@ -1149,8 +1149,8 @@ local function CB_GroupSellFinalize(gen)
     end
 end
 
--- Sells all gray items for a single bot. Uses INVENTORY_BULK_SELL_V1 if available,
--- otherwise falls back to whisper "s gray".
+-- Sells all gray items for a single bot. Uses INVENTORY_BULK_SELL_V1 when bridge is present,
+-- whisper "s gray" only when bridge is absent.
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 NS.bulkSellPending = NS.bulkSellPending or {}
@@ -1165,8 +1165,8 @@ NS.CB_BridgeBulkSell = function(key, botName)
     end
 end
 
--- Sells all gray items for every bot in the group. Uses INVENTORY_BULK_SELL_V1 if available,
--- otherwise broadcasts "s gray" to the group.
+-- Sells all gray items for every bot in the group. Uses INVENTORY_BULK_SELL_V1 when bridge is present,
+-- broadcasts "s gray" to the group only when bridge is absent.
 NS.CB_BridgeGroupBulkSell = function()
     if CB_EffectiveBridgeState() == "present" then
         groupSellGen = groupSellGen + 1
@@ -1208,8 +1208,8 @@ NS.CB_BridgeGroupBulkSell = function()
     end
 end
 
--- Equips an item on a bot. Uses ITEM_EQUIP_V1 if exact bag/slot coordinates are available,
--- otherwise falls back to whisper "e <link>".
+-- Equips an item on a bot. Uses ITEM_EQUIP_V1 when bridge is present with exact bag/slot coordinates,
+-- whisper "e <link>" only when bridge is absent.
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 ---@param link    string Item link.
@@ -1250,8 +1250,8 @@ NS.CB_BridgeEquipItem = function(key, botName, link, cell)
     end
 end
 
--- Uses an item (consumable). Uses ITEM_USE_V1 if exact bag/slot coordinates are available,
--- otherwise falls back to whisper "u <link>".
+-- Uses an item (consumable). Uses ITEM_USE_V1 when bridge is present with exact bag/slot coordinates,
+-- whisper "u <link>" only when bridge is absent.
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 ---@param link    string Item link.
@@ -1275,8 +1275,8 @@ NS.CB_BridgeUseItem = function(key, botName, link, cell)
     end
 end
 
--- Destroys an item. Uses ITEM_DESTROY_V1 if exact bag/slot coordinates are available,
--- otherwise falls back to whisper "destroy <link>".
+-- Destroys an item. Uses ITEM_DESTROY_V1 when bridge is present with exact bag/slot coordinates,
+-- whisper "destroy <link>" only when bridge is absent.
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 ---@param link    string Item link.
@@ -1300,8 +1300,8 @@ NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
     end
 end
 
--- Sells a single item at a vendor. Uses ITEM_SELL if exact bag/slot coordinates
--- are available, otherwise falls back to whisper "s <link>".
+-- Sells a single item at a vendor. Uses ITEM_SELL when bridge is present with exact bag/slot coordinates,
+-- whisper "s <link>" only when bridge is absent.
 ---@param key     string Bot name-key.
 ---@param botName string Bot display name.
 ---@param link    string Item link.
@@ -1325,9 +1325,9 @@ NS.CB_BridgeSellItem = function(key, botName, link, cell)
     end
 end
 
--- Deposits an item to personal bank or guild bank via ITEM_DEPOSIT_EXACT_V1 if exact
--- bag/slot coordinates are available and Bridge is active. Returns true if sent via Bridge,
--- false if caller should fall back to whisper.
+-- Deposits an item to personal bank or guild bank via ITEM_DEPOSIT_EXACT_V1 when bridge is present with exact
+-- bag/slot coordinates. Returns true if sent via Bridge, false otherwise;
+-- whisper path is used only when bridge is absent.
 ---@param botName string  Bot's display name.
 ---@param action  string  "BANK_DEPOSIT" or "GBANK_DEPOSIT".
 ---@param cell    table?  Inventory cell button carrying exact coordinates.
@@ -1346,7 +1346,7 @@ end
 
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
--- CHAT_MSG_ADDON block. Whisper fallback sends "quests" and parses the reply
+-- CHAT_MSG_ADDON block. Whisper "quests all" only when bridge is absent and parses the reply
 -- lines in the CHAT_MSG_WHISPER handler into the same { {id, status, name} } shape.
 -- The live entry.quests is intentionally NOT cleared here: the bridge path
 -- resets it on QUESTS_BEGIN, and the whisper path swaps fresh data in on

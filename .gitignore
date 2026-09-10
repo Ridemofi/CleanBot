@@ -44,3 +44,6 @@ CLAUDE.md
 *.warperia
 .luarc.json
 .claude/
+
+# Graphify local output
+graphify-out/
