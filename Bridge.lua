@@ -1344,6 +1344,27 @@ NS.CB_BridgeDepositItem = function(botName, action, cell)
     return true
 end
 
+-- Withdraws an item from personal bank to bags via ITEM_ACTION BANK_WITHDRAW, matched by
+-- itemId + count (bank carries no slot coordinates). Uses bridge when present,
+-- whisper "bank -<link>" only when bridge is absent.
+---@param key     string Bot name-key.
+---@param botName string Bot display name.
+---@param link    string Item link.
+---@param count   number? Stack count to withdraw.
+---@return boolean sentViaBridge
+NS.withdrawPending = NS.withdrawPending or {}
+NS.CB_BridgeWithdrawItem = function(key, botName, link, count)
+    if CB_EffectiveBridgeState() ~= "present" then return false end
+    local itemId = tonumber(strmatch(link or "", "item:(%d+)")) or 0
+    if itemId <= 0 then return false end
+
+    local token = CB_NextInvToken("wdraw")
+    NS.withdrawPending[token] = { key = key, botName = botName }
+    CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~BANK_WITHDRAW~" .. tostring(itemId) .. "~" .. tostring(count or 1))
+    NS.CB_ScheduleReconcile(key, botName)
+    return true
+end
+
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
 -- CHAT_MSG_ADDON block. Whisper "quests all" only when bridge is absent and parses the reply
@@ -2099,6 +2120,10 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             if isSingleBulk then
                 NS.bulkSellPending[token] = nil
             end
+            local isWithdraw = action == "BANK_WITHDRAW" and NS.withdrawPending and token and NS.withdrawPending[token]
+            if isWithdraw then
+                NS.withdrawPending[token] = nil
+            end
             if status == "OK" then
                 if action == "SELL_GREY" and movedCount > 0 then
                     if NS.CB_Print then
@@ -2108,6 +2133,9 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                         NS.CB_PlaySellSound()
                     end
                 end
+            end
+            if status ~= "OK" and isWithdraw and reason == "BANKER_NOT_FOUND" then
+                StaticPopup_Show("CLEANBOT_NO_BANKER", name)
             end
             local gp = NS.groupSellPending
             if gp and action == "SELL_GREY" and gp.expected and gp.expected[key] then

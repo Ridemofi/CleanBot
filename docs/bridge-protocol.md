@@ -79,6 +79,7 @@ Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot co
 | Packet | Capability | Reply | Notes |
 |---|---|---|---|
 | `RUN~ITEM_ACTION~<bot>~<token>~SELL_GREY~0~0` | `INVENTORY_BULK_SELL_V1` | `INVENTORY_ITEM_ACTION~<bot>~<token>~SELL_GREY~<itemId>~<OK/ERR>~<reason>~<moved>` | Bulk "Sell Trash" (`CB_BridgeBulkSell` / `CB_BridgeGroupBulkSell`); whisper `s gray` only when absent |
+| `RUN~ITEM_ACTION~<bot>~<token>~BANK_WITHDRAW~<itemId>~<count>` | — (matched by itemId+count, no coordinates) | `INVENTORY_ITEM_ACTION~<bot>~<token>~BANK_WITHDRAW~<itemId>~<OK/ERR>~<reason>~<moved>` | Bank withdraw (`CB_BridgeWithdrawItem`); whisper `bank -<link>` only when absent |
 | `RUN~ITEM_SELL~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_SELL_SINGLE_V1` | `INVENTORY_ITEM_SELL~<bot>~<token>~<OK/ERR>~<reason>~<bag>~<slot>~<itemId>~<sold>` | Single-item vendor sell (`CB_BridgeSellItem`, wired into `CB_DoSell`); whisper `s <link>` only when absent |
 | `RUN~ITEM_EQUIP~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_EQUIP_V1` | `INVENTORY_ITEM_EQUIP~` | Equip (`CB_BridgeEquipItem`); whisper `e <link>` only when absent |
 | `RUN~ITEM_USE~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_USE_V1` | `INVENTORY_ITEM_USE~` | Use (`CB_BridgeUseItem`); whisper `u <link>` only when absent |

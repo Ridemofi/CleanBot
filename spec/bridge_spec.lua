@@ -552,3 +552,44 @@ describe("Vendor sell sounds", function()
         assert.equals(0, sounds)
     end)
 end)
+
+describe("Bridge bank withdraw (ITEM_ACTION BANK_WITHDRAW)", function()
+    local link = "|cffffffff|Hitem:5678|h[Bank Thing]|h|r"
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        NS.withdrawPending = {}
+        Mock.party = 1
+    end)
+
+    it("sends RUN~ITEM_ACTION BANK_WITHDRAW matched by itemId+count when present", function()
+        assert.is_true(NS.CB_BridgeWithdrawItem("bot", "Bot", link, 3))
+        assert.equals(1, #Mock.addon)
+        assert.is_true(Mock.addon[1].text:find("RUN~ITEM_ACTION~Bot~", 1, true) == 1)
+        assert.is_true(Mock.addon[1].text:find("~BANK_WITHDRAW~5678~3", 1, true) ~= nil)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("returns false for a bad link when present (no whisper)", function()
+        assert.is_false(NS.CB_BridgeWithdrawItem("bot", "Bot", "nonsense", 1))
+        assert.equals(0, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("returns false when bridge is absent (caller whispers)", function()
+        NS.bridgeState = "absent"
+        assert.is_false(NS.CB_BridgeWithdrawItem("bot", "Bot", link, 1))
+        assert.equals(0, #Mock.addon)
+    end)
+
+    it("clears the pending token on OK", function()
+        NS.CB_BridgeWithdrawItem("bot", "Bot", link, 1)
+        local sentMsg = Mock.addon[1].text
+        local tok = strmatch(sentMsg, "RUN~ITEM_ACTION~Bot~([^~]+)~BANK_WITHDRAW")
+        assert.is_not_nil(tok)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INVENTORY_ITEM_ACTION~Bot~" .. tok .. "~BANK_WITHDRAW~5678~OK~OK~1")
+        assert.is_nil(NS.withdrawPending[tok])
+    end)
+end)

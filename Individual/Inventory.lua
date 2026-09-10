@@ -439,12 +439,12 @@ NS.CB_OptimisticBuy = function(key, botName, link)
 end
 
 -- ── Deposit / withdraw between a bot's bags and bank ─────────────────────
--- Both directions share the "bank" trigger ("bank <link>" deposits from bags,
--- "bank -<link>" withdraws); both need a banker NPC near the bot (handled by the
--- no-banker popup in Bridge.lua). The command is ENQUEUED on the bot's serial whisper
--- queue (awaitingBankOp is its busy flag) so it can't interleave with a list reply;
--- the move is reflected eagerly right away, and a debounced reconcile (also enqueued)
--- confirms/corrects once the queue drains.
+-- Deposit shares the "bank" trigger ("bank <link>"); withdraw uses "bank -<link>" on the
+-- whisper path and ITEM_ACTION BANK_WITHDRAW (matched by itemId + count, no coordinates)
+-- on the bridge path. Both need a banker NPC near the bot (handled by the no-banker
+-- popup in Bridge.lua). Whisper commands are ENQUEUED on the bot's serial whisper queue
+-- (awaitingBankOp is its busy flag) so they can't interleave with a list reply; the move
+-- is reflected eagerly right away, and a debounced reconcile confirms/corrects it.
 ---@param key     string  Bot name-key.
 ---@param botName string  Bot's display name (command target).
 ---@param link    string  Item link to move.
@@ -458,6 +458,11 @@ NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
     if dir == "deposit" and isBridge then
         if NS.CB_BridgeDepositItem then
             sent = NS.CB_BridgeDepositItem(botName, "BANK_DEPOSIT", srcCell)
+        end
+    elseif dir == "withdraw" and isBridge then
+        if NS.CB_BridgeWithdrawItem then
+            local count = (srcCell and srcCell.count) or 1
+            sent = NS.CB_BridgeWithdrawItem(key, botName, link, count)
         end
     else
         local prefix = (dir == "withdraw") and "bank -" or "bank "
