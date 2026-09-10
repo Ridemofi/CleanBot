@@ -2267,8 +2267,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
         -- ITEM_DEPOSIT_EXACT~<botName>~<token>~<status>~<reason>~<action>~<srcBag>~<srcSlot>~<srcItemId>~<srcCount>~<moved>
-        elseif msg and strsub(msg, 1, 20) == "ITEM_DEPOSIT_EXACT~" then
-            local rest = strsub(msg, 21)
+        elseif msg and strsub(msg, 1, 19) == "ITEM_DEPOSIT_EXACT~" then
+            local rest = strsub(msg, 20)
             local rawName, r2 = NS.CB_SplitOnce(rest, "~")
             local _, r3 = NS.CB_SplitOnce(r2, "~")
             local status, r4 = NS.CB_SplitOnce(r3, "~")

@@ -481,6 +481,69 @@ NS.CB_BankMove = function(key, botName, link, dir, srcCell, destCell)
     if sent then
         local destFrame = (dir == "withdraw") and NS.botInventoryFrames[key] or NS.botBankFrames[key]
         CB_OptimisticMove(srcCell, destFrame, destCell)
+
+        -- Eager cache update so a fast SORT cannot resurrect the moved stack(s) before the
+        -- reconcile refetch lands (the reconcile restores them if the server op failed).
+        local entry = CleanBot_PartyBots[key]
+        local srcItems = entry and ((dir == "withdraw") and entry.bank and entry.bank.items
+            or (entry.inventory and entry.inventory.items))
+        local movedCount = (srcCell and srcCell.count) or 1
+        if srcItems then
+            local itemId = tonumber(strmatch(link or "", "item:(%d+)"))
+            if itemId then
+                local function matches(it)
+                    return it and tonumber(strmatch(it.link or "", "item:(%d+)")) == itemId
+                end
+                if dir == "deposit" and isBridge then
+                    -- Exact-slot move: drop that stack (or the first match without coordinates).
+                    for i, it in ipairs(srcItems) do
+                        if matches(it) and (not srcCell or not srcCell.bag
+                            or (it.bag == srcCell.bag and it.slot == srcCell.slot)) then
+                            movedCount = it.count or 1
+                            table.remove(srcItems, i)
+                            break
+                        end
+                    end
+                elseif dir == "withdraw" and isBridge then
+                    -- Server covers the requested count with whole stacks.
+                    local need = movedCount
+                    for i = #srcItems, 1, -1 do
+                        if need <= 0 then break end
+                        local it = srcItems[i]
+                        if matches(it) then
+                            local c = it.count or 1
+                            if c <= need then table.remove(srcItems, i); need = need - c
+                            else it.count = c - need; need = 0 end
+                        end
+                    end
+                else
+                    -- Whisper "bank" moves every matching stack.
+                    movedCount = 0
+                    for i = #srcItems, 1, -1 do
+                        local it = srcItems[i]
+                        if matches(it) then movedCount = movedCount + (it.count or 1); table.remove(srcItems, i) end
+                    end
+                end
+                -- Eager cache add at destination so a fast SORT keeps the arrival
+                -- (the reconcile removes it again if the server op failed).
+                if movedCount > 0 then
+                    local destItems = (dir == "withdraw") and entry.inventory and entry.inventory.items
+                        or (entry.bank and entry.bank.items)
+                    if destItems then
+                        if dir == "withdraw" then
+                            destItems[#destItems + 1] = { link = link, count = movedCount }
+                        else
+                            local done = false
+                            for _, it in ipairs(destItems) do
+                                if matches(it) then it.count = (it.count or 1) + movedCount; done = true; break end
+                            end
+                            if not done then destItems[#destItems + 1] = { link = link, count = movedCount } end
+                        end
+                    end
+                end
+            end
+        end
+        if srcCell then srcCell.bag, srcCell.slot, srcCell.itemId, srcCell.count = nil, nil, nil, nil end
     end
 end
 
@@ -1064,7 +1127,10 @@ local function CB_SortInventory(items)
             quality   = quality,
             iLevel    = iLevel or 0,
             slotOrder = SLOT_ORDER[equipLoc] or 99,
-            origIdx   = i,
+            -- Deterministic data tiebreak (never arrival order): the visual grid must
+            -- paint identically regardless of how the list was rebuilt (eager add at the
+            -- end vs server slot order after reconcile).
+            itemId    = tonumber(strmatch(item.link or "", "item:(%d+)")) or 0,
         }
     end
 
@@ -1075,7 +1141,10 @@ local function CB_SortInventory(items)
             if a.quality  ~= b.quality  then return a.quality  > b.quality  end
             if a.slotOrder ~= b.slotOrder then return a.slotOrder < b.slotOrder end
         end
-        return a.origIdx < b.origIdx
+        if a.itemId ~= b.itemId then return a.itemId < b.itemId end
+        local ac, bc = a.item.count or 1, b.item.count or 1
+        if ac ~= bc then return ac < bc end
+        return tostring(a.item.link) < tostring(b.item.link)
     end)
 
     local sorted = {}
