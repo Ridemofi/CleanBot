@@ -86,8 +86,8 @@ Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot co
 | `RUN~ITEM_DESTROY~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_DESTROY_V1` | `INVENTORY_ITEM_DESTROY~` | Destroy (`CB_BridgeDestroyItem`); whisper `destroy <link>` only when absent |
 | `RUN~ITEM_DEPOSIT_EXACT~<bot>~<token>~BANK_DEPOSIT\|GBANK_DEPOSIT~<bag>~<slot>~<itemId>~<count>` | `ITEM_DEPOSIT_EXACT_V1` | `ITEM_DEPOSIT_EXACT~` | Deposit to personal / guild bank (`CB_BridgeDepositItem`); whisper `bank <link>` / `guild bank <link>` only when absent |
 
-Queries (`co ?`, `nc ?`, `stats`, `formation ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` when bridge is absent) are never
-allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. `stats` always whispers even when bridge is present.
+Queries (`co ?`, `nc ?`, `formation ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` / `stats` when bridge is absent) are never
+allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>`.
 
 ### Queries — `GET~`
 
@@ -102,6 +102,7 @@ allowlisted, so they always whisper and their replies arrive via `CHAT_MSG_WHISP
 | `GET~BANK~<botName>~<token>` | Bot's bank contents | `BANK_BEGIN~` / `BANK_ITEM~` / `BANK_ERROR~` / `BANK_END~` |
 | `GET~SPELLBOOK~<botName>~<token>` | Bot's spellbook | `SB_BEGIN~` / `SB_ITEM~` / `SB_END~` (`SPELLBOOK_*` alias) |
 | `GET~QUESTS~ALL~<botName>~quests` | Bot's quest log | `QUESTS_BEGIN~` / `QUESTS_ITEM~` / `QUESTS_END~` |
+| `GET~STATS~<botName>` | Bot stats (level, money, bags, durability, XP, mana) | `STATS~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
 `CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).
@@ -132,6 +133,7 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | `INV_SUMMARY~<name>~<token>~<gold>~<silver>~<copper>~<bagUsed>~<bagTotal>` | money + bag counts | Bag is **used/total** (the whisper-path `stats` reply is free/total — converted on parse) |
 | `INV_ITEM~<name>~<token>~<encodedItem>` | one item per packet | Decoded by `NS.CB_ParseItemLine` |
 | `INV_END~<name>` | — | Clears the in-flight flag; renders if the inventory frame is open |
+| `STATS~<name>~<level>~<gold>~<silver>~<copper>~<bagUsed>~<bagTotal>~<durPct>~<xpPct>~<manaPct>` | bot stats snapshot | Populates level, money, bag totals, durability, and XP; refreshes inventory and paperdoll XP bar |
 | `QUESTS_BEGIN~<name>~<token>~<mode>` | — | Resets `entry.quests` |
 | `QUESTS_ITEM~<name>~<token>~<mode>~<status>~<questID>~<questName>` | status `C`/`I`; name URL-encoded — but the current bridge fills it with the questID again (`SendQuestPacketsForBot`) | Appended as `{ id, status, name }`; `name` kept only when the field differs from the id (a real title), since quest Abandon must drop by title |
 | `QUESTS_END~<name>~<token>~<mode>` | — | Renders if the quest frame is open |
