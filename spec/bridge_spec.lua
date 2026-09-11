@@ -593,3 +593,59 @@ describe("Bridge bank withdraw (ITEM_ACTION BANK_WITHDRAW)", function()
         assert.is_nil(NS.withdrawPending[tok])
     end)
 end)
+
+describe("Bridge stats (GET~STATS and STATS~ packet)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            mirabella = { name = "Mirabella" }
+        }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        Mock.party = 1
+    end)
+
+    it("dispatches GET~STATS~botName via bridge and marks in-flight without whispering", function()
+        local entry = CleanBot_PartyBots.mirabella
+        NS.CB_FetchStats(entry)
+        assert.equals(1, #Mock.addon)
+        assert.equals("GET~STATS~Mirabella", Mock.addon[1].text)
+        assert.equals(0, #Mock.whispers)
+        assert.is_true(entry.awaitingMoney)
+        assert.equals(0, entry.moneyTimeout)
+
+        -- In-flight dedup: second call bounces
+        NS.CB_FetchStats(entry)
+        assert.equals(1, #Mock.addon)
+    end)
+
+    it("parses incoming STATS~ wire payload and updates bot entry", function()
+        local entry = CleanBot_PartyBots.mirabella
+        entry.awaitingMoney = true
+        entry.moneyTimeout = 5.0
+
+        -- STATS~name~level~gold~silver~copper~bagUsed~bagTotal~durabilityPct~xpPct~manaPct
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATS~Mirabella~80~12~34~56~8~20~95~41~100")
+
+        assert.is_false(entry.awaitingMoney)
+        assert.equals(0, entry.moneyTimeout)
+        assert.is_not_nil(entry.statsAt)
+        assert.equals(80, entry.level)
+        assert.same({ gold = 12, silver = 34, copper = 56 }, entry.money)
+        assert.equals(8, entry.inventory.bagUsed)
+        assert.equals(20, entry.inventory.bagTotal)
+        assert.equals(95, entry.durability)
+        assert.equals("41", entry.xpPercent)
+        assert.equals(100, entry.manaPct)
+    end)
+
+    it("whispers stats when bridge is absent", function()
+        NS.bridgeState = "absent"
+        local entry = CleanBot_PartyBots.mirabella
+        NS.CB_FetchStats(entry)
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("stats", Mock.whispers[1].text)
+        assert.equals("Mirabella", Mock.whispers[1].target)
+    end)
+end)

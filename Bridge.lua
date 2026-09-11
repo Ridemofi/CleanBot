@@ -1018,6 +1018,12 @@ NS.CB_FetchStats = function(entry, force)
     -- rather than stacking duplicate whispers in reqQueue while wqBusy is held.
     entry.awaitingMoney = true
     entry.moneyTimeout  = 0
+
+    if CB_EffectiveBridgeState() == "present" then
+        CB_SendBridge("GET~STATS~" .. entry.name)
+        return
+    end
+
     -- Enqueue so the "stats" reply doesn't overlap an items/bank stream.
     NS.CB_EnqueueRequest(strlower(entry.name), function()
         CB_MarkExpectReply(entry.name)
@@ -2035,6 +2041,56 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 if entry.inventory then
                     entry.inventory.bagUsed  = tonumber(bagUsed)  or 0
                     entry.inventory.bagTotal = tonumber(bagTotal) or 0
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 6) == "STATS~" then
+            local rest              = strsub(msg, 7)
+            local rawName, r2       = NS.CB_SplitOnce(rest, "~")
+            local level, r3         = NS.CB_SplitOnce(r2,   "~")
+            local gold, r4          = NS.CB_SplitOnce(r3,   "~")
+            local silver, r5        = NS.CB_SplitOnce(r4,   "~")
+            local copper, r6        = NS.CB_SplitOnce(r5,   "~")
+            local bagUsed, r7       = NS.CB_SplitOnce(r6,   "~")
+            local bagTotal, r8      = NS.CB_SplitOnce(r7,   "~")
+            local durPct, r9        = NS.CB_SplitOnce(r8,   "~")
+            local xpPct, manaPct    = NS.CB_SplitOnce(r9,   "~")
+
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            local key     = strlower(botName)
+            local entry   = CleanBot_PartyBots[key]
+            if entry then
+                entry.moneyTimeout  = 0
+                entry.awaitingMoney = false
+                entry.statsAt       = GetTime()
+
+                if level and level ~= "" then
+                    entry.level = tonumber(level) or entry.level
+                end
+
+                entry.money = {
+                    gold   = tonumber(gold)   or 0,
+                    silver = tonumber(silver) or 0,
+                    copper = tonumber(copper) or 0,
+                }
+
+                entry.inventory = entry.inventory or {}
+                entry.inventory.bagUsed  = tonumber(bagUsed)  or 0
+                entry.inventory.bagTotal = tonumber(bagTotal) or 0
+
+                entry.durability = tonumber(durPct) or 0
+                entry.xpPercent  = xpPct and tostring(tonumber(xpPct) or 0) or nil
+                entry.manaPct    = tonumber(manaPct) or 0
+
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and f:IsShown() then
+                    NS.CB_RenderInventory(key)
+                end
+                if NS.CB_RefreshXPBarForKey then
+                    NS.CB_RefreshXPBarForKey(key)
+                end
+                if NS.CB_UpdateTabData then
+                    NS.CB_UpdateTabData(key)
                 end
             end
 

@@ -529,7 +529,8 @@ NS.CB_RefreshXPBar = function(slot)
     local xp = slot and slot.xpBar
     if not xp then return end
 
-    local level    = (slot.unit and UnitExists(slot.unit)) and UnitLevel(slot.unit) or nil
+    local entry    = slot.key and CleanBot_PartyBots[slot.key]
+    local level    = (slot.unit and UnitExists(slot.unit)) and UnitLevel(slot.unit) or (entry and entry.level) or nil
     local maxLevel = MAX_PLAYER_LEVEL or 80
 
     if level and level >= maxLevel then
@@ -543,12 +544,12 @@ NS.CB_RefreshXPBar = function(slot)
     xp.rested:Hide()
     xp.label:SetText(level and level > 0 and tostring(level) or "")
 
-    local entry = slot.key and CleanBot_PartyBots[slot.key]
     local cur, rest
-    if entry and entry.xpPercent then
-        cur, rest = entry.xpPercent:match("(%d+)/(%d+)")
+    local xpStr = entry and entry.xpPercent and tostring(entry.xpPercent)
+    if xpStr then
+        cur, rest = xpStr:match("(%d+)/(%d+)")
         if not cur then
-            cur = entry.xpPercent:match("(%d+)")
+            cur = xpStr:match("(%d+)")
         end
         cur  = tonumber(cur)
         rest = tonumber(rest)
