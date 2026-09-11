@@ -540,13 +540,16 @@ NS.CB_RefreshXPBar = function(slot)
         return
     end
 
-    xp.rested:Show()
+    xp.rested:Hide()
     xp.label:SetText(level and level > 0 and tostring(level) or "")
 
     local entry = slot.key and CleanBot_PartyBots[slot.key]
     local cur, rest
     if entry and entry.xpPercent then
         cur, rest = entry.xpPercent:match("(%d+)/(%d+)")
+        if not cur then
+            cur = entry.xpPercent:match("(%d+)")
+        end
         cur  = tonumber(cur)
         rest = tonumber(rest)
     end
@@ -554,7 +557,7 @@ NS.CB_RefreshXPBar = function(slot)
     if cur then
         xp.fill:SetValue(cur)
         xp.rested:SetValue(math.min(cur + (rest or 0), 100))
-        xp.tooltipText = cur .. "% into level \194\183 " .. (rest or 0) .. "% rested"
+        xp.tooltipText = cur .. "% into level"
     else
         -- No stats reply yet — empty bar, level label only.
         xp.fill:SetValue(0)

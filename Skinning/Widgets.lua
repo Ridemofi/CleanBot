@@ -1353,11 +1353,10 @@ end
 -- behind the main fill, which sits behind the label. Both bars share the 0–100
 -- range so values are percentages straight from the bot's "stats" reply.
 -- ============================================================
--- Exact Blizzard default XP-bar colors (FrameXML MainMenuBar.lua): the blue it
--- uses while rested for the earned fill, and the purple normal-XP color for the
--- rested-bonus overlay behind it.
-local XP_FILL_COLOR   = { 0.0,  0.39, 0.88 }
-local XP_RESTED_COLOR = { 0.58, 0.0,  0.55 }
+-- Blizzard default XP-bar colors (FrameXML MainMenuBar.lua):
+-- purple for normal earned XP fill, blue for rested-bonus overlay.
+local XP_FILL_COLOR   = { 0.58, 0.0,  0.55 }
+local XP_RESTED_COLOR = { 0.0,  0.39, 0.88 }
 
 --- Creates a thin XP status bar (fill + rested overlay + label) for the paperdoll.
 ---@param parent table  Parent frame to anchor against.
@@ -1406,9 +1405,10 @@ NS.CB_CreateXPBar = function(parent)
     rested:SetMinMaxValues(0, 100)
     rested:SetValue(0)
 
-    -- Main fill (drawn above rested): 0 to cur. Child of rested so it sits on top.
-    local fill = CreateFrame("StatusBar", nil, rested)
-    fill:SetAllPoints(rested)
+    -- Main fill (drawn above rested): 0 to cur. Child of xp.
+    local fill = CreateFrame("StatusBar", nil, xp)
+    fill:SetPoint("TOPLEFT",     xp, "TOPLEFT",      inset, -inset)
+    fill:SetPoint("BOTTOMRIGHT", xp, "BOTTOMRIGHT", -inset,  inset)
     fill:SetFrameLevel(rested:GetFrameLevel() + 1)
     fill:SetStatusBarTexture(barTex)
     fill:SetStatusBarColor(unpack(XP_FILL_COLOR))
