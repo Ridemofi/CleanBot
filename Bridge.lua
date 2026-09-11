@@ -721,6 +721,11 @@ end
 -- 0.5 chosen from /cbtiming measurements on a healthy server (2026-06).
 NS.WHISPER_SILENCE = 0.5
 
+-- Safety timeout for in-flight single-query responses (stats, formation, loot strategy).
+-- Prevents getting stuck forever if a bot drops a reply, while avoiding premature
+-- retries when queued behind earlier commands in the serial whisper queue.
+NS.QUERY_TIMEOUT = 10.0
+
 -- ── Per-bot serial whisper queue ─────────────────────────────────────────
 -- A bot's reply (items / bank / stats list, a "Strategies:" line, a "put X to bank"
 -- confirmation, …) is a whisper that can span many lines and may echo item links. Sending
@@ -845,9 +850,25 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
 
         if entry.awaitingMoney then
             entry.moneyTimeout = (entry.moneyTimeout or 0) + dt
-            if entry.moneyTimeout >= NS.WHISPER_SILENCE then
+            if entry.moneyTimeout >= NS.QUERY_TIMEOUT then
                 entry.awaitingMoney  = false
                 entry.moneyTimeout   = 0
+            end
+        end
+
+        if entry.awaitingFormation then
+            entry.formationTimeout = (entry.formationTimeout or 0) + dt
+            if entry.formationTimeout >= NS.QUERY_TIMEOUT then
+                entry.awaitingFormation = false
+                entry.formationTimeout  = 0
+            end
+        end
+
+        if entry.awaitingLootStrategy then
+            entry.lootStrategyTimeout = (entry.lootStrategyTimeout or 0) + dt
+            if entry.lootStrategyTimeout >= NS.QUERY_TIMEOUT then
+                entry.awaitingLootStrategy = false
+                entry.lootStrategyTimeout  = 0
             end
         end
 
@@ -993,10 +1014,12 @@ NS.CB_FetchStats = function(entry, force)
     if not force and entry.statsAt and (GetTime() - entry.statsAt) < NS.STATS_TTL then
         return
     end
+    -- Mark in-flight immediately before enqueuing so concurrent callers bounce
+    -- rather than stacking duplicate whispers in reqQueue while wqBusy is held.
+    entry.awaitingMoney = true
+    entry.moneyTimeout  = 0
     -- Enqueue so the "stats" reply doesn't overlap an items/bank stream.
     NS.CB_EnqueueRequest(strlower(entry.name), function()
-        entry.awaitingMoney = true
-        entry.moneyTimeout  = 0
         CB_MarkExpectReply(entry.name)
         CB_TagSelfWhisper(entry.name, "stats")
         SendChatMessage("stats", "WHISPER", nil, entry.name)
@@ -1005,25 +1028,29 @@ end
 
 -- Queries a bot's current movement formation ("formation ?"). The reply
 -- ("Formation: <name>") is parsed in the CHAT_MSG_WHISPER handler into entry.formation.
--- Cached: skips when entry.formation is already known unless `force` is set. Routes
--- through CB_SendBotCommand so it serializes and the reply is hidden.
+-- Cached: skips when entry.formation is already known or a query is in flight unless `force` is set.
+-- Routes through CB_SendBotCommand so it serializes and the reply is hidden.
 ---@param entry table   The CleanBot_PartyBots entry to query.
 ---@param force boolean? Re-query even when a formation is already cached.
 NS.CB_FetchFormation = function(entry, force)
     if not entry or not entry.name then return end
-    if entry.formation and not force then return end
+    if (entry.formation and not force) or entry.awaitingFormation then return end
+    entry.awaitingFormation = true
+    entry.formationTimeout  = 0
     NS.CB_SendBotCommand(entry.name, "formation ?")
 end
 
 -- Queries a bot's current loot-quality strategy ("ll ?"). The reply
 -- ("Loot strategy: <mode>") is parsed in the CHAT_MSG_WHISPER handler into entry.lootStrategy.
--- Cached: skips when entry.lootStrategy is already known unless `force` is set. Routes through
--- CB_SendBotCommand so it serializes and the reply is hidden (same as CB_FetchFormation).
+-- Cached: skips when entry.lootStrategy is already known or a query is in flight unless `force` is set.
+-- Routes through CB_SendBotCommand so it serializes and the reply is hidden (same as CB_FetchFormation).
 ---@param entry table   The CleanBot_PartyBots entry to query.
 ---@param force boolean? Re-query even when a loot strategy is already cached.
 NS.CB_FetchLootStrategy = function(entry, force)
     if not entry or not entry.name then return end
-    if entry.lootStrategy and not force then return end
+    if (entry.lootStrategy and not force) or entry.awaitingLootStrategy then return end
+    entry.awaitingLootStrategy = true
+    entry.lootStrategyTimeout  = 0
     NS.CB_SendBotCommand(entry.name, "ll ?")
 end
 
@@ -1665,11 +1692,13 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Current-formation reply: "formation ?" / no-arg answers "Formation: |cff00ff00<name>"
-        -- (SetFormationAction → TellMaster). Strip color codes, cache the token, refresh the
-        -- Commands-tab dropdowns that display it.
-        if entry and strsub(msg, 1, 11) == "Formation: " then
-            local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
-            local name  = clean:match("Formation:%s*(%a+)")
+        -- (SetFormationAction → TellMaster). Strip color codes first so an initial color escape
+        -- doesn't defeat the prefix match, cache the token, refresh the Commands-tab dropdowns.
+        local cleanMsg = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
+        if entry and cleanMsg:find("^%s*Formation:%s*") then
+            entry.awaitingFormation = false
+            entry.formationTimeout  = 0
+            local name = cleanMsg:match("Formation:%s*(%a+)")
             if name then
                 entry.formation = strlower(name)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { formation = true }) end
@@ -1678,11 +1707,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         -- Current-loot-strategy reply: "ll ?" answers "Loot strategy: <mode>" (normal/gray/all/
-        -- disenchant). Strip color codes, cache the lowercase token, refresh the Loot Quality
+        -- disenchant). Strip color codes first, cache the lowercase token, refresh the Loot Quality
         -- dropdowns that display it.
-        if entry and strsub(msg, 1, 15) == "Loot strategy: " then
-            local clean = msg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|h", ""):gsub("|r", "")
-            local mode  = clean:match("Loot strategy:%s*(%a+)")
+        if entry and cleanMsg:find("^%s*Loot strategy:%s*") then
+            entry.awaitingLootStrategy = false
+            entry.lootStrategyTimeout  = 0
+            local mode = cleanMsg:match("Loot strategy:%s*(%a+)")
             if mode then
                 entry.lootStrategy = strlower(mode)
                 if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { loot = true }) end
@@ -1717,15 +1747,24 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             NS.awaitingProbe[key]  = nil
             NS.joinCandidates[key] = nil   -- confirmed; no longer awaiting a readiness whisper
             local class = NS.CB_ResolveClass(sender, "WARRIOR")
-            entry = {
-                name       = sender,
-                class      = class,
-                combat     = NS.CB_DefaultCombat(),
-                nonCombat  = NS.CB_DefaultNonCombat(),
-                classData  = NS.CB_DefaultClassData(class),
-                awaitingNc = true,
-            }
-            CleanBot_PartyBots[key] = entry
+            local existing = CleanBot_PartyBots[key]
+            if existing then
+                entry = existing
+                entry.name       = sender
+                entry.class      = class
+                entry.classData  = entry.classData or NS.CB_DefaultClassData(class)
+                entry.awaitingNc = true
+            else
+                entry = {
+                    name       = sender,
+                    class      = class,
+                    combat     = NS.CB_DefaultCombat(),
+                    nonCombat  = NS.CB_DefaultNonCombat(),
+                    classData  = NS.CB_DefaultClassData(class),
+                    awaitingNc = true,
+                }
+                CleanBot_PartyBots[key] = entry
+            end
             NS.CB_StoreCombat(entry, msg)
             NS.CB_SendBotCommand(sender, "nc ?")
             if CleanBotFrame:IsShown() then NS.CleanBot_RefreshTabs() end
@@ -1816,20 +1855,21 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 local key      = strlower(name)
                 local existing = CleanBot_PartyBots[key]
                 -- Bridge mode: strategy data arrives via GET~STATES (STATE~ packets),
-                -- so DETAIL~ only establishes identity/class. Preserve any strategy
-                -- data already parsed from an earlier STATE~ packet.
-                CleanBot_PartyBots[key] = {
-                    name      = name,
-                    class     = classKey,
-                    combat    = (existing and existing.combat)    or NS.CB_DefaultCombat(),
-                    nonCombat = (existing and existing.nonCombat) or NS.CB_DefaultNonCombat(),
-                    classData = (existing and existing.classData) or NS.CB_DefaultClassData(classKey),
-                    inventory = existing and existing.inventory,
-                    money     = existing and existing.money,
-                }
-            end
-            if CleanBotFrame:IsShown() then
-                NS.CleanBot_RefreshTabs()
+                -- so DETAIL~ only establishes identity/class. Mutate existing entry in place
+                -- to preserve cached formation, lootStrategy, statsAt, and in-flight request state.
+                if existing then
+                    existing.name      = name
+                    existing.class     = classKey
+                    existing.classData = existing.classData or NS.CB_DefaultClassData(classKey)
+                else
+                    CleanBot_PartyBots[key] = {
+                        name      = name,
+                        class     = classKey,
+                        combat    = NS.CB_DefaultCombat(),
+                        nonCombat = NS.CB_DefaultNonCombat(),
+                        classData = NS.CB_DefaultClassData(classKey),
+                    }
+                end
             end
 
         -- ── Strategy framed packets (STATE_FRAMING_V1) ──────────────────────
