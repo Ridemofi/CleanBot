@@ -69,3 +69,7 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 - Open Bot Inventory on Trade
     - Drag and Drop Items to Trade
     - Right Click Items to Remove
+
+# Credits
+
+- **BennyBroseph (Jake James)**, author of the original CleanBot.
