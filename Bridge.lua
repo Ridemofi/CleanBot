@@ -664,12 +664,18 @@ NS.CB_RequestSpellbook = function(key, botName, force)
         CleanBot_PartyBots[key] = entry
     end
 
+    if CB_EffectiveBridgeState() ~= "present" then
+        if NS.CB_RenderSpellbook then NS.CB_RenderSpellbook(key) end
+        return
+    end
+
     if not force and entry.spells and #entry.spells > 0 then
         if NS.CB_RenderSpellbook then NS.CB_RenderSpellbook(key) end
         return
     end
 
     entry.awaitingSpellbook = true
+    entry.spellbookTimeout  = 0
     entry.spellbookStaging  = {}
     entry.spellbookSeen     = {}
 
@@ -882,6 +888,18 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             if entry.lootStrategyTimeout >= NS.QUERY_TIMEOUT then
                 entry.awaitingLootStrategy = false
                 entry.lootStrategyTimeout  = 0
+            end
+        end
+
+        if entry.awaitingSpellbook then
+            entry.spellbookTimeout = (entry.spellbookTimeout or 0) + dt
+            if entry.spellbookTimeout >= NS.QUERY_TIMEOUT then
+                entry.awaitingSpellbook = false
+                entry.spellbookTimeout  = 0
+                local f = NS.botSpellbookFrames and NS.botSpellbookFrames[key]
+                if f and f:IsShown() and NS.CB_RenderSpellbook then
+                    NS.CB_RenderSpellbook(key)
+                end
             end
         end
 

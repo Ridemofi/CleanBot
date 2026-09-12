@@ -86,9 +86,14 @@ hooksecurefunc("UnitPopup_HideButtons", function()
     if not menu then return end
     local name  = CB_MenuTargetName()
     local isBot = name and CleanBot_PartyBots[strlower(name)] ~= nil
+    local isBridge = not NS.CB_EffectiveBridgeState or (NS.CB_EffectiveBridgeState() == "present")
     for index, value in ipairs(menu) do
         if CB_HANDLERS[value] then
-            UnitPopupShown[UIDROPDOWNMENU_MENU_LEVEL][index] = isBot and 1 or 0
+            local show = isBot
+            if value == "CB_SPELLBOOK" and not isBridge then
+                show = false
+            end
+            UnitPopupShown[UIDROPDOWNMENU_MENU_LEVEL][index] = show and 1 or 0
         end
     end
 end)

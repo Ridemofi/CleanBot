@@ -779,7 +779,11 @@ local function CB_RenderSpellbookCards(f)
     CB_UpdateBotTabs(f)
 
     -- 6. Loading overlay state
-    if entry and entry.awaitingSpellbook then
+    local isBridge = not NS.CB_EffectiveBridgeState or (NS.CB_EffectiveBridgeState() == "present")
+    if not isBridge and not (entry and entry.spells and #entry.spells > 0) then
+        f.loadingLabel:SetText("|cffff4444MultiBot Bridge Required|r\n\n|cffffffffThis feature requires the |cffffd200mod-multibot-bridge|r\nserver module to read spells.|r")
+        f.loadingOverlay:Show()
+    elseif entry and entry.awaitingSpellbook then
         f.loadingLabel:SetText("Fetching spells from " .. (entry.name or f.botName) .. "...")
         f.loadingOverlay:Show()
     else
@@ -1153,6 +1157,10 @@ NS.CB_ToggleSpellbook = function(key, botName, anchor)
     end
 
     f:Show()
+
+    if NS.CB_EffectiveBridgeState and NS.CB_EffectiveBridgeState() ~= "present" and NS.CB_Print then
+        NS.CB_Print("Spellbook requires mod-multibot-bridge on the server.")
+    end
 end
 
 --- Button factory placed on the bot's equip/model panel alongside Bag & Quest
@@ -1184,7 +1192,16 @@ NS.CB_CreateSpellbookButton = function(slot, model, slotSize)
         local botName = entry and entry.name or slot.name or key
         NS.CB_ToggleSpellbook(key, botName)
     end)
-    NS.CB_SetTooltip(btn, "Spellbook", "View this bot's spells and abilities.")
+    NS.CB_SetTooltip(btn, function()
+        local isBridge = not NS.CB_EffectiveBridgeState or (NS.CB_EffectiveBridgeState() == "present")
+        return isBridge and "Spellbook" or "Spellbook (Requires Bridge)"
+    end, function()
+        local isBridge = not NS.CB_EffectiveBridgeState or (NS.CB_EffectiveBridgeState() == "present")
+        if not isBridge then
+            return "|cffff2020Server Requirement:|r\nRequires mod-multibot-bridge installed on the server."
+        end
+        return "View this bot's spells and abilities."
+    end)
 
     slot.spellbookBtn = btn
 end

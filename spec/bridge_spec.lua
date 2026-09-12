@@ -759,3 +759,53 @@ describe("Bridge formations (GET~FORMATIONS and RUN~FORMATION)", function()
         NS.CB_FetchFormationsBridge = oldFetch
     end)
 end)
+
+describe("Spellbook bridge gating and timeout", function()
+    local NS
+
+    before_each(function()
+        Mock.reset()
+        Mock.party = 1
+        dofile("Bridge.lua")
+        NS = CleanBotNS
+        CleanBot_PartyBots = {
+            mirabella = {
+                name      = "Mirabella",
+                class     = "MAGE",
+                combat    = {},
+                nonCombat = {},
+                classData = {},
+            },
+        }
+    end)
+
+    it("does not send GET~SPELLBOOK or set awaitingSpellbook when bridge is absent", function()
+        NS.bridgeState = "absent"
+        NS.CB_RequestSpellbook("mirabella", "Mirabella", false)
+
+        assert.equals(0, #Mock.addon)
+        assert.is_nil(CleanBot_PartyBots.mirabella.awaitingSpellbook)
+    end)
+
+    it("sends GET~SPELLBOOK and sets awaitingSpellbook when bridge is present", function()
+        NS.bridgeState = "present"
+        NS.CB_RequestSpellbook("mirabella", "Mirabella", false)
+
+        assert.equals(1, #Mock.addon)
+        assert.equals("MBOT", Mock.addon[1].prefix)
+        assert.is_true(Mock.addon[1].text:find("^GET~SPELLBOOK~Mirabella~") ~= nil)
+        assert.is_true(CleanBot_PartyBots.mirabella.awaitingSpellbook)
+    end)
+
+    it("times out awaitingSpellbook after QUERY_TIMEOUT in invTickFrame", function()
+        NS.bridgeState = "present"
+        NS.CB_RequestSpellbook("mirabella", "Mirabella", false)
+        assert.is_true(CleanBot_PartyBots.mirabella.awaitingSpellbook)
+
+        -- Advance time past QUERY_TIMEOUT (10.0s)
+        Mock.tick(10.1)
+
+        assert.is_false(CleanBot_PartyBots.mirabella.awaitingSpellbook)
+        assert.equals(0, CleanBot_PartyBots.mirabella.spellbookTimeout)
+    end)
+end)
