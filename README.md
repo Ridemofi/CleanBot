@@ -38,6 +38,14 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 
 <img width="700" alt="image" src="https://github.com/user-attachments/assets/083d79cc-d36a-443e-bc55-7d21d037e57f" />
 
+## Spellbook *(Requires Multibot Bridge)*
+- Modern Dragonflight-style 3-column card layout
+- Search and filter spells in real time
+- Order bots to cast spells directly on themselves (Left-Click) or on you (Right-Click)
+- Multi-bot tabs to easily switch between party members
+
+<img width="700" alt="image" src="https://github.com/user-attachments/assets/54703df0-290b-460a-a5f6-f88cbe23638b" />
+
 # Group Tab
 - Multiselect groups and bots using the standard windows shortcuts
     - CTRL + Click to add/remove selection
