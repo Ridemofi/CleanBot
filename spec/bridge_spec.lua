@@ -649,3 +649,113 @@ describe("Bridge stats (GET~STATS and STATS~ packet)", function()
         assert.equals("Mirabella", Mock.whispers[1].target)
     end)
 end)
+
+describe("Bridge formations (GET~FORMATIONS and RUN~FORMATION)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            mirabella = { name = "Mirabella" },
+            artemis = { name = "Artemis" },
+        }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        NS.formationsPending = false
+        NS.formationsTimeout = 0
+        NS.formationsToken = nil
+        Mock.party = 1
+    end)
+
+    it("dispatches GET~FORMATIONS~GROUP~~token via bridge and marks bots awaitingFormation", function()
+        NS.CB_FetchFormationsBridge()
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^GET~FORMATIONS~GROUP~~%d+%-forms%-%d+$"))
+        assert.is_true(NS.formationsPending)
+        assert.is_true(CleanBot_PartyBots.mirabella.awaitingFormation)
+        assert.is_true(CleanBot_PartyBots.artemis.awaitingFormation)
+        assert.equals(0, #Mock.whispers)
+
+        -- Deduplication: second call without force does not send duplicate packet
+        NS.CB_FetchFormationsBridge()
+        assert.equals(1, #Mock.addon)
+    end)
+
+    it("parses FORMATIONS_BEGIN, FORMATIONS_ITEM, and FORMATIONS_END wire packets", function()
+        NS.CB_FetchFormationsBridge()
+        local token = NS.formationsToken
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATIONS_BEGIN~" .. token .. "~2")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATIONS_ITEM~" .. token .. "~Mirabella~arrow")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATIONS_ITEM~" .. token .. "~Artemis~melee")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATIONS_END~" .. token .. "~2")
+
+        assert.is_false(NS.formationsPending)
+        assert.equals("arrow", CleanBot_PartyBots.mirabella.formation)
+        assert.is_false(CleanBot_PartyBots.mirabella.awaitingFormation)
+        assert.equals("melee", CleanBot_PartyBots.artemis.formation)
+        assert.is_false(CleanBot_PartyBots.artemis.awaitingFormation)
+    end)
+
+    it("clears awaitingFormation flag when ITEM returns '?' without corrupting existing formation", function()
+        CleanBot_PartyBots.mirabella.formation = "arrow"
+        NS.CB_FetchFormationsBridge()
+        local token = NS.formationsToken
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATIONS_ITEM~" .. token .. "~Mirabella~%3F")
+
+        assert.is_false(CleanBot_PartyBots.mirabella.awaitingFormation)
+        assert.equals("arrow", CleanBot_PartyBots.mirabella.formation)
+    end)
+
+    it("dispatches RUN~FORMATION~GROUP~~token~formation for allowed formations in group command", function()
+        if not NS.CB_SendGroupCommand then dofile("CommandControls.lua") end
+        NS.CB_SendGroupCommand("formation arrow")
+
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~FORMATION~GROUP~~%d+%-setform%-%d+~arrow$"))
+        assert.equals("arrow", CleanBot_PartyBots.mirabella.formation)
+        assert.equals("arrow", CleanBot_PartyBots.artemis.formation)
+        assert.equals(0, #Mock.chat)
+    end)
+
+    it("falls back to PARTY/RAID chat broadcast for unsupported formation 'far'", function()
+        if not NS.CB_SendGroupCommand then dofile("CommandControls.lua") end
+        NS.CB_SendGroupCommand("formation far")
+
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.chat)
+        assert.equals("formation far", Mock.chat[1].text)
+        assert.equals("PARTY", Mock.chat[1].channel)
+    end)
+
+    it("whispers formation ? when bridge is absent", function()
+        NS.bridgeState = "absent"
+        local entry = CleanBot_PartyBots.mirabella
+        NS.CB_FetchFormation(entry)
+
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("formation ?", Mock.whispers[1].text)
+        assert.equals("Mirabella", Mock.whispers[1].target)
+        assert.is_true(entry.awaitingFormation)
+    end)
+
+    it("handles FORMATION_ACK and triggers re-fetch on failure", function()
+        local reFetchCalled = false
+        local oldFetch = NS.CB_FetchFormationsBridge
+        NS.CB_FetchFormationsBridge = function(force)
+            if force then reFetchCalled = true end
+        end
+
+        -- ACK with succeeded = 2, failed = 0
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATION_ACK~GROUP~~tok123~2~0~shield")
+        assert.equals("shield", CleanBot_PartyBots.mirabella.formation)
+        assert.equals("shield", CleanBot_PartyBots.artemis.formation)
+        assert.is_false(reFetchCalled)
+
+        -- ACK with failed = 1 triggers reconciliation
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "FORMATION_ACK~GROUP~~tok123~1~1~shield")
+        assert.is_true(reFetchCalled)
+
+        NS.CB_FetchFormationsBridge = oldFetch
+    end)
+end)

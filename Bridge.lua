@@ -297,6 +297,19 @@ local BRIDGE_RTI_ICONS = {
     ["SKULL"]    = true,
 }
 
+-- RUN~FORMATION — IsAllowedFormationName() (case-sensitive, lowercase 8 tokens; "far" excluded)
+local BRIDGE_FORMATIONS = {
+    ["arrow"]  = true,
+    ["queue"]  = true,
+    ["near"]   = true,
+    ["melee"]  = true,
+    ["line"]   = true,
+    ["circle"] = true,
+    ["chaos"]  = true,
+    ["shield"] = true,
+}
+NS.BRIDGE_FORMATIONS = BRIDGE_FORMATIONS
+
 ---@param command string  The bot command being routed.
 ---@return string|nil      The bridge opcode ("COMBAT"/"POSITION"/"LOOT"/"RTI") or nil to whisper.
 local function CB_GetBridgeOpcode(command)
@@ -491,6 +504,9 @@ NS.CB_RequestSync = function()
                 CB_SendBridge("GET~STATES~" .. token)
             else
                 CB_SendBridge("GET~STATES")
+            end
+            if NS.CB_FetchFormationsBridge then
+                NS.CB_FetchFormationsBridge()
             end
         elseif CB_EffectiveBridgeState() == "absent" then
             CB_ProbePartyForBots()
@@ -915,6 +931,22 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             end
         end
     end
+
+    -- Safety net for in-flight Bridge formations query (clears flags on network drop/timeout)
+    if NS.formationsPending then
+        NS.formationsTimeout = (NS.formationsTimeout or 0) + dt
+        if NS.formationsTimeout >= NS.QUERY_TIMEOUT then
+            NS.formationsPending = false
+            NS.formationsTimeout = 0
+            NS.formationsToken   = nil
+            for _, e in pairs(CleanBot_PartyBots) do
+                if e.awaitingFormation then
+                    e.awaitingFormation = false
+                    e.formationTimeout  = 0
+                end
+            end
+        end
+    end
 end)
 
 NS.pendingBankRequests = NS.pendingBankRequests or {}
@@ -1032,14 +1064,61 @@ NS.CB_FetchStats = function(entry, force)
     end)
 end
 
+local formSeq = 0
+local function CB_NextFormToken(prefix)
+    formSeq = (formSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "forms") .. "-" .. tostring(formSeq)
+end
+
+--- Queries movement formations for all bots in the group via Bridge (GET~FORMATIONS~GROUP~~<token>).
+---@param force boolean? Re-query even if a query is already in flight.
+NS.CB_FetchFormationsBridge = function(force)
+    if CB_EffectiveBridgeState() ~= "present" then return end
+    if NS.formationsPending and not force then return end
+
+    local token = CB_NextFormToken("forms")
+    NS.formationsPending = true
+    NS.formationsTimeout = 0
+    NS.formationsToken   = token
+
+    for _, e in pairs(CleanBot_PartyBots) do
+        e.awaitingFormation = true
+        e.formationTimeout  = 0
+    end
+
+    CB_SendBridge("GET~FORMATIONS~GROUP~~" .. token)
+end
+
+--- Sets movement formation for the whole group via Bridge (RUN~FORMATION~GROUP~~<token>~<formation>).
+---@param lowerForm string  Lowercase formation token (must be in BRIDGE_FORMATIONS).
+NS.CB_BridgeSetGroupFormation = function(lowerForm)
+    if not lowerForm or not BRIDGE_FORMATIONS[lowerForm] then return end
+    local token = CB_NextFormToken("setform")
+    CB_SendBridge("RUN~FORMATION~GROUP~~" .. token .. "~" .. lowerForm)
+
+    -- Optimistic cache for all known group members
+    for _, e in pairs(CleanBot_PartyBots) do
+        e.formation = lowerForm
+    end
+    if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+end
+
 -- Queries a bot's current movement formation ("formation ?"). The reply
 -- ("Formation: <name>") is parsed in the CHAT_MSG_WHISPER handler into entry.formation.
+-- When bridge is present, dispatches GET~FORMATIONS~GROUP to fetch all bots silently.
+-- When bridge is absent, whispers "formation ?" to the specific bot.
 -- Cached: skips when entry.formation is already known or a query is in flight unless `force` is set.
 -- Routes through CB_SendBotCommand so it serializes and the reply is hidden.
 ---@param entry table   The CleanBot_PartyBots entry to query.
 ---@param force boolean? Re-query even when a formation is already cached.
 NS.CB_FetchFormation = function(entry, force)
     if not entry or not entry.name then return end
+    if CB_EffectiveBridgeState() == "present" then
+        if (entry.formation and not force) or NS.formationsPending then return end
+        NS.CB_FetchFormationsBridge(force)
+        return
+    end
+
     if (entry.formation and not force) or entry.awaitingFormation then return end
     entry.awaitingFormation = true
     entry.formationTimeout  = 0
@@ -2197,6 +2276,65 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.CB_RenderInventory(key)
             elseif f and NS.CB_SetInventoryLoading then
                 NS.CB_SetInventoryLoading(f, false)
+            end
+
+        -- ── Formation packets (GET~FORMATIONS / RUN~FORMATION) ───────────
+        elseif msg and strsub(msg, 1, 17) == "FORMATIONS_BEGIN~" then
+            local rest = strsub(msg, 18)
+            local token, count = NS.CB_SplitOnce(rest, "~")
+            -- Initial frame marker; token validated on items/end
+
+        elseif msg and strsub(msg, 1, 16) == "FORMATIONS_ITEM~" then
+            -- FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>
+            local rest = strsub(msg, 17)
+            local token, r2 = NS.CB_SplitOnce(rest, "~")
+            local rawName, rawForm = NS.CB_SplitOnce(r2, "~")
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            local formName = CB_UrlDecode(rawForm):match("^%s*(.-)%s*$")
+            if botName and botName ~= "" then
+                local key = strlower(botName)
+                local entry = CleanBot_PartyBots[key]
+                if entry then
+                    -- Unconditionally clear awaiting flags to prevent 10s hang on "?"
+                    entry.awaitingFormation = false
+                    entry.formationTimeout  = 0
+                    if formName and formName ~= "" and formName ~= "?" then
+                        entry.formation = strlower(formName)
+                        if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key, { formation = true }) end
+                    end
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 15) == "FORMATIONS_END~" then
+            local rest = strsub(msg, 16)
+            local token, count = NS.CB_SplitOnce(rest, "~")
+            NS.formationsPending = false
+            NS.formationsTimeout = 0
+            NS.formationsToken   = nil
+            if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+
+        elseif msg and strsub(msg, 1, 14) == "FORMATION_ACK~" then
+            -- FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>
+            local rest = strsub(msg, 15)
+            local scope, r2 = NS.CB_SplitOnce(rest, "~")
+            local target, r3 = NS.CB_SplitOnce(r2, "~")
+            local token, r4 = NS.CB_SplitOnce(r3, "~")
+            local succeeded, r5 = NS.CB_SplitOnce(r4, "~")
+            local failed, encForm = NS.CB_SplitOnce(r5, "~")
+            local succCount = tonumber(succeeded) or 0
+            local failCount = tonumber(failed) or 0
+            local form = strlower(CB_UrlDecode(encForm):match("^%s*(.-)%s*$"))
+            if succCount > 0 and form ~= "" then
+                for _, e in pairs(CleanBot_PartyBots) do
+                    e.formation = form
+                end
+                if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+            end
+            -- If any bot failed or nothing succeeded, re-fetch to reconcile real server state
+            if failCount > 0 or succCount == 0 then
+                if NS.CB_FetchFormationsBridge then
+                    NS.CB_FetchFormationsBridge(true)
+                end
             end
 
         -- ── Inventory & Item action ACKs ──────────────────────────────────

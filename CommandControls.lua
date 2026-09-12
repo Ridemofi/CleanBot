@@ -33,13 +33,29 @@ NS.CB_SendGroupCommand = function(cmd)
         NS.CB_Print("|cff888888[simulate]|r → group: " .. cmd)
         return
     end
-    if GetNumRaidMembers() > 0 then
-        SendChatMessage(cmd, "RAID")
-    elseif GetNumPartyMembers() > 0 then
-        SendChatMessage(cmd, "PARTY")
-    else
+    if GetNumRaidMembers() == 0 and GetNumPartyMembers() == 0 then
         NS.CB_Print("You are not in a party or raid.")
         return
+    end
+
+    -- Bridge formation dispatch: when bridge is present and formation is supported,
+    -- execute natively and silently without chat echo.
+    local formToken = strmatch(cmd, "^formation%s+(%a+)$")
+    if formToken then
+        local lowerForm = strlower(formToken)
+        if NS.CB_EffectiveBridgeState and NS.CB_EffectiveBridgeState() == "present"
+            and NS.BRIDGE_FORMATIONS and NS.BRIDGE_FORMATIONS[lowerForm] then
+            if NS.CB_BridgeSetGroupFormation then
+                NS.CB_BridgeSetGroupFormation(lowerForm)
+                return
+            end
+        end
+    end
+
+    if GetNumRaidMembers() > 0 then
+        SendChatMessage(cmd, "RAID")
+    else
+        SendChatMessage(cmd, "PARTY")
     end
     -- Hide our own party/raid echo (chat window) and its world chat bubble (gated on Hide Bot Chatter).
     if NS.CB_TagSelfGroup then NS.CB_TagSelfGroup(cmd) end

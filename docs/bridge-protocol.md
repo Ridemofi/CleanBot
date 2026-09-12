@@ -85,9 +85,10 @@ Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot co
 | `RUN~ITEM_USE~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_USE_V1` | `INVENTORY_ITEM_USE~` | Use (`CB_BridgeUseItem`); whisper `u <link>` only when absent |
 | `RUN~ITEM_DESTROY~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_DESTROY_V1` | `INVENTORY_ITEM_DESTROY~` | Destroy (`CB_BridgeDestroyItem`); whisper `destroy <link>` only when absent |
 | `RUN~ITEM_DEPOSIT_EXACT~<bot>~<token>~BANK_DEPOSIT\|GBANK_DEPOSIT~<bag>~<slot>~<itemId>~<count>` | `ITEM_DEPOSIT_EXACT_V1` | `ITEM_DEPOSIT_EXACT~` | Deposit to personal / guild bank (`CB_BridgeDepositItem`); whisper `bank <link>` / `guild bank <link>` only when absent |
+| `RUN~FORMATION~GROUP~~<token>~<formation>` | — | `FORMATION_ACK~` | Set group formation (8 tokens: `arrow`, `queue`, `near`, `melee`, `line`, `circle`, `chaos`, `shield`); `far` and absent fallback to `PARTY`/`RAID` |
 
-Queries (`co ?`, `nc ?`, `formation ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` / `stats` when bridge is absent) are never
-allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>`.
+Queries (`co ?`, `nc ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` / `stats` / `formation ?` when bridge is absent) are never
+allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>` and formations route via `GET~FORMATIONS~GROUP~~<token>`.
 
 ### Queries — `GET~`
 
@@ -103,6 +104,7 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~SPELLBOOK~<botName>~<token>` | Bot's spellbook | `SB_BEGIN~` / `SB_ITEM~` / `SB_END~` (`SPELLBOOK_*` alias) |
 | `GET~QUESTS~ALL~<botName>~quests` | Bot's quest log | `QUESTS_BEGIN~` / `QUESTS_ITEM~` / `QUESTS_END~` |
 | `GET~STATS~<botName>` | Bot stats (level, money, bags, durability, XP, mana) | `STATS~` |
+| `GET~FORMATIONS~GROUP~~<token>` | Bot movement formations for all group bots | `FORMATIONS_BEGIN~` / `FORMATIONS_ITEM~` / `FORMATIONS_END~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
 `CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).
@@ -134,6 +136,10 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | `INV_ITEM~<name>~<token>~<encodedItem>` | one item per packet | Decoded by `NS.CB_ParseItemLine` |
 | `INV_END~<name>` | — | Clears the in-flight flag; renders if the inventory frame is open |
 | `STATS~<name>~<level>~<gold>~<silver>~<copper>~<bagUsed>~<bagTotal>~<durPct>~<xpPct>~<manaPct>` | bot stats snapshot | Populates level, money, bag totals, durability, and XP; refreshes inventory and paperdoll XP bar |
+| `FORMATIONS_BEGIN~<token>~<count>` | — | Marks start of formations batch |
+| `FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>` | per-bot formation snapshot | Updates entry.formation for bot; clears awaitingFormation unconditionally |
+| `FORMATIONS_END~<token>~<sentCount>` | — | Clears formationsPending and refreshes UI controls |
+| `FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>` | formation change acknowledgement | Updates group members' formation if succeeded > 0; triggers re-fetch on failure |
 | `QUESTS_BEGIN~<name>~<token>~<mode>` | — | Resets `entry.quests` |
 | `QUESTS_ITEM~<name>~<token>~<mode>~<status>~<questID>~<questName>` | status `C`/`I`; name URL-encoded — but the current bridge fills it with the questID again (`SendQuestPacketsForBot`) | Appended as `{ id, status, name }`; `name` kept only when the field differs from the id (a real title), since quest Abandon must drop by title |
 | `QUESTS_END~<name>~<token>~<mode>` | — | Renders if the quest frame is open |
