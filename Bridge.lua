@@ -372,16 +372,16 @@ end
 -- Command-reply window: bots confirm nearly every command with a whisper — a one-line ack
 -- ("Picking ...", "Wait for attack time set to ...") or a multi-line dump (items/quests/spec).
 -- Rather than enumerate every reply string, we open a per-bot window the instant we whisper a
--- command; ChatFilter.lua suppresses that bot's whispers while the window is open and slides it
--- forward as each reply line arrives, so the window brackets the whole burst and closes after
--- WHISPER_SILENCE of quiet (the same silence basis the collection flags use). Keyed by
--- lowercased name so it also covers discovery probes to not-yet-cached members.
+-- command with INITIAL_REPLY_TIMEOUT (5.0s) patience to accommodate initial bot processing and
+-- login latency. ChatFilter.lua suppresses that bot's whispers while the window is open and
+-- slides it to WHISPER_SILENCE (0.5s) as each reply line arrives, closing promptly once quiet.
+NS.INITIAL_REPLY_TIMEOUT = 5.0
 NS.botReplyWindow = NS.botReplyWindow or {}   -- [lowername] = GetTime() deadline
 
 ---@param botName string  The bot we just whispered a command/query to.
 local function CB_MarkExpectReply(botName)
     if botName and botName ~= "" then
-        NS.botReplyWindow[strlower(botName)] = GetTime() + NS.WHISPER_SILENCE
+        NS.botReplyWindow[strlower(botName)] = GetTime() + (NS.INITIAL_REPLY_TIMEOUT or 5.0)
     end
 end
 -- Exposed so broadcast (party/raid) commands can open reply windows for the bots
@@ -728,13 +728,10 @@ local function CB_FinalizeSpecList(key, entry)
     if NS.CB_SyncTalentSpec then NS.CB_SyncTalentSpec(key) end
 end
 
--- How long a whisper collection waits in SILENCE before declaring itself done.
--- The clock resets on every line received, so this must cover (a) the bot's
--- time-to-first-reply after our query and (b) the max gap between burst lines —
--- NOT the total reply length. Bots reply fast on a healthy server; favor snappy
--- UX when things run smoothly over graceful degradation under lag.
--- Tune with /cbtiming (measures both first-reply latency and inter-line gaps).
--- 0.5 chosen from /cbtiming measurements on a healthy server (2026-06).
+-- Inter-line silence and collection finalization timeout.
+-- Once a reply stream starts, lines arrive rapidly (gaps < 20ms). 0.5s ensures snappy
+-- UI finalization (inventory/bank/quests) without lag. For initial command latency
+-- before the first reply arrives, see NS.INITIAL_REPLY_TIMEOUT (5.0s).
 NS.WHISPER_SILENCE = 0.5
 
 -- Safety timeout for in-flight single-query responses (stats, formation, loot strategy).

@@ -89,9 +89,21 @@ describe("ChatFilter incoming whisper (reply window)", function()
         assert.is_true(filter("CHAT_MSG_WHISPER", "another line", "Bot"))
     end)
 
-    it("shows a bot whisper after the window closes (unsolicited greeting)", function()
+    it("hides a bot reply arriving after 2 seconds inside the initial reply window", function()
         NS.CB_MarkExpectReply("Bot")
-        Mock.now = NS.WHISPER_SILENCE + 0.1
+        Mock.now = 2.1  -- bot took 2.1s to process and reply
+        assert.is_true(filter("CHAT_MSG_WHISPER", "Loot strategy: normal", "Bot"))
+        -- Window slides to now + WHISPER_SILENCE (2.1 + 0.5 = 2.6)
+        Mock.now = 2.102  -- next line arrived 2ms later
+        assert.is_true(filter("CHAT_MSG_WHISPER", "Always loot items:", "Bot"))
+        -- After 0.5s of silence (now = 2.7s, still well under 5.0s), the window has closed
+        Mock.now = 2.7
+        assert.is_false(filter("CHAT_MSG_WHISPER", "random chatter", "Bot"))
+    end)
+
+    it("shows a bot whisper after the window closes without reply", function()
+        NS.CB_MarkExpectReply("Bot")
+        Mock.now = (NS.INITIAL_REPLY_TIMEOUT or 5.0) + 0.1
         assert.is_false(filter("CHAT_MSG_WHISPER", "Hello!", "Bot"))
     end)
 
