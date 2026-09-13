@@ -761,13 +761,11 @@ describe("Bridge formations (GET~FORMATIONS and RUN~FORMATION)", function()
 end)
 
 describe("Spellbook bridge gating and timeout", function()
-    local NS
+    local NS = CleanBotNS
 
     before_each(function()
         Mock.reset()
         Mock.party = 1
-        dofile("Bridge.lua")
-        NS = CleanBotNS
         CleanBot_PartyBots = {
             mirabella = {
                 name      = "Mirabella",
@@ -807,5 +805,99 @@ describe("Spellbook bridge gating and timeout", function()
 
         assert.is_false(CleanBot_PartyBots.mirabella.awaitingSpellbook)
         assert.equals(0, CleanBot_PartyBots.mirabella.spellbookTimeout)
+    end)
+end)
+
+describe("Talent spec list bridge routing and handling", function()
+    local NS = CleanBotNS
+
+    before_each(function()
+        Mock.reset()
+        Mock.party = 1
+        CleanBot_PartyBots = {
+            artemis = {
+                name  = "Artemis",
+                class = "WARRIOR",
+            },
+        }
+        NS.premadeSpecs = {}
+        NS.premadeSpecsFetching = {}
+        NS.pendingSpecListRequests = {}
+    end)
+
+    it("sends GET~TALENT_SPEC_LIST with unique token when bridge is present", function()
+        NS.bridgeState = "present"
+        NS.CB_FetchSpecList("artemis", CleanBot_PartyBots.artemis)
+
+        assert.equals(1, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        assert.equals("MBOT", Mock.addon[1].prefix)
+        assert.is_true(Mock.addon[1].text:find("^GET~TALENT_SPEC_LIST~Artemis~") ~= nil)
+        assert.is_true(NS.premadeSpecsFetching["WARRIOR"])
+    end)
+
+    it("falls back to whisper 'talents spec list' when bridge is absent", function()
+        NS.bridgeState = "absent"
+        NS.CB_FetchSpecList("artemis", CleanBot_PartyBots.artemis)
+
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("talents spec list", Mock.whispers[1].text)
+        assert.equals("Artemis", Mock.whispers[1].target)
+        assert.is_true(NS.premadeSpecsFetching["WARRIOR"])
+    end)
+
+    it("parses incoming spec items and populates premadeSpecs on END", function()
+        NS.bridgeState = "present"
+        NS.CB_FetchSpecList("artemis", CleanBot_PartyBots.artemis)
+
+        local sentMsg = Mock.addon[1].text
+        local token = sentMsg:match("^GET~TALENT_SPEC_LIST~Artemis~(.+)$")
+        assert.is_not_nil(token)
+
+        local syncCalled = false
+        local oldSync = NS.CB_SyncTalentSpec
+        NS.CB_SyncTalentSpec = function(key)
+            if key == "artemis" then syncCalled = true end
+        end
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_BEGIN~Artemis~" .. token)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_CURRENT~Artemis~" .. token .. "~0~51~0~20")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_ITEM~Artemis~" .. token .. "~1~arms%20pve~51-0-20")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_ITEM~Artemis~" .. token .. "~2~fury%20pve~18-53-0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_END~Artemis~" .. token)
+
+        assert.is_true(syncCalled)
+        assert.is_nil(NS.premadeSpecsFetching["WARRIOR"])
+        assert.is_not_nil(NS.premadeSpecs["WARRIOR"])
+        assert.equals(2, #NS.premadeSpecs["WARRIOR"])
+        assert.equals("arms pve", NS.premadeSpecs["WARRIOR"][1].name)
+        assert.are.same({ 51, 0, 20 }, NS.premadeSpecs["WARRIOR"][1].t)
+        assert.equals("fury pve", NS.premadeSpecs["WARRIOR"][2].name)
+        assert.are.same({ 18, 53, 0 }, NS.premadeSpecs["WARRIOR"][2].t)
+
+        NS.CB_SyncTalentSpec = oldSync
+    end)
+
+    it("isolates parallel requests by token avoiding cross-contamination", function()
+        CleanBot_PartyBots.mirabella = { name = "Mirabella", class = "MAGE" }
+        NS.bridgeState = "present"
+
+        NS.CB_FetchSpecList("artemis", CleanBot_PartyBots.artemis)
+        local tok1 = Mock.addon[1].text:match("^GET~TALENT_SPEC_LIST~Artemis~(.+)$")
+
+        NS.CB_FetchSpecList("mirabella", CleanBot_PartyBots.mirabella)
+        local tok2 = Mock.addon[2].text:match("^GET~TALENT_SPEC_LIST~Mirabella~(.+)$")
+
+        assert.is_true(tok1 ~= tok2)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_BEGIN~Mirabella~" .. tok2)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_ITEM~Mirabella~" .. tok2 .. "~1~frost%20pve~0-0-71")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "TALENT_SPEC_END~Mirabella~" .. tok2)
+
+        assert.is_not_nil(NS.premadeSpecs["MAGE"])
+        assert.equals(1, #NS.premadeSpecs["MAGE"])
+        assert.equals("frost pve", NS.premadeSpecs["MAGE"][1].name)
+        assert.is_nil(NS.premadeSpecs["WARRIOR"])
     end)
 end)

@@ -87,8 +87,8 @@ Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot co
 | `RUN~ITEM_DEPOSIT_EXACT~<bot>~<token>~BANK_DEPOSIT\|GBANK_DEPOSIT~<bag>~<slot>~<itemId>~<count>` | `ITEM_DEPOSIT_EXACT_V1` | `ITEM_DEPOSIT_EXACT~` | Deposit to personal / guild bank (`CB_BridgeDepositItem`); whisper `bank <link>` / `guild bank <link>` only when absent |
 | `RUN~FORMATION~GROUP~~<token>~<formation>` | — | `FORMATION_ACK~` | Set group formation (8 tokens: `arrow`, `queue`, `near`, `melee`, `line`, `circle`, `chaos`, `shield`); `far` and absent fallback to `PARTY`/`RAID` |
 
-Queries (`co ?`, `nc ?`, `ll ?`, `talents spec list`, plus `items` / `quests all` / `bank` / `stats` / `formation ?` when bridge is absent) are never
-allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>` and formations route via `GET~FORMATIONS~GROUP~~<token>`.
+Queries (`co ?`, `nc ?`, `ll ?`, plus `items` / `quests all` / `bank` / `stats` / `formation ?` / `talents spec list` when bridge is absent) are never
+allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>`, formations route via `GET~FORMATIONS~GROUP~~<token>`, and premade specs route via `GET~TALENT_SPEC_LIST~<botName>~<token>`.
 
 ### Queries — `GET~`
 
@@ -105,6 +105,7 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~QUESTS~ALL~<botName>~quests` | Bot's quest log | `QUESTS_BEGIN~` / `QUESTS_ITEM~` / `QUESTS_END~` |
 | `GET~STATS~<botName>` | Bot stats (level, money, bags, durability, XP, mana) | `STATS~` |
 | `GET~FORMATIONS~GROUP~~<token>` | Bot movement formations for all group bots | `FORMATIONS_BEGIN~` / `FORMATIONS_ITEM~` / `FORMATIONS_END~` |
+| `GET~TALENT_SPEC_LIST~<botName>~<token>` | Premade talent specs for bot's class and level | `TALENT_SPEC_BEGIN~` / `TALENT_SPEC_CURRENT~` / `TALENT_SPEC_ITEM~` / `TALENT_SPEC_END~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
 `CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).

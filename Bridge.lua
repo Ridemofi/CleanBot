@@ -707,6 +707,24 @@ NS.CB_FetchSpecList = function(key, entry)
     if not entry or not entry.class then return end
     if NS.premadeSpecs[entry.class] or NS.premadeSpecsFetching[entry.class] then return end
     NS.premadeSpecsFetching[entry.class] = true
+
+    if CB_EffectiveBridgeState() == "present" then
+        NS.pendingSpecListRequests = NS.pendingSpecListRequests or {}
+        NS.specListSeq = (NS.specListSeq or 0) + 1
+        local bName = entry.name or key
+        local token = tostring(math.floor(GetTime() * 1000)) .. "-speclist-" .. tostring(NS.specListSeq)
+        NS.pendingSpecListRequests[token] = {
+            token   = token,
+            class   = entry.class,
+            key     = key,
+            botName = bName,
+            staging = {},
+            expires = GetTime() + (NS.QUERY_TIMEOUT or 10.0),
+        }
+        CB_SendBridge(string.format("GET~TALENT_SPEC_LIST~%s~%s", bName, token))
+        return
+    end
+
     -- Enqueue: the silence timer (specListTimeout) must start at SEND time, not now, or a
     -- deferred send behind other requests would finalize before the reply arrives.
     NS.CB_EnqueueRequest(key, function()
@@ -942,6 +960,19 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                     if bf and NS.CB_SetInventoryLoading then
                         NS.CB_SetInventoryLoading(bf, false)
                     end
+                end
+            end
+        end
+    end
+
+    -- Safety net for in-flight Bridge spec list requests (clears fetching flag on timeout)
+    if NS.pendingSpecListRequests then
+        local now = GetTime()
+        for token, req in pairs(NS.pendingSpecListRequests) do
+            if now >= req.expires then
+                NS.pendingSpecListRequests[token] = nil
+                if req.class then
+                    NS.premadeSpecsFetching[req.class] = nil
                 end
             end
         end
@@ -2658,6 +2689,53 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 local f = NS.botSpellbookFrames and NS.botSpellbookFrames[key]
                 if f and f:IsShown() and NS.CB_RenderSpellbook then
                     NS.CB_RenderSpellbook(key)
+                end
+            end
+
+        -- ── Premade talent-spec list packets (GET~TALENT_SPEC_LIST) ────────
+        elseif msg and strsub(msg, 1, 18) == "TALENT_SPEC_BEGIN~" then
+            local rest = strsub(msg, 19)
+            local rawName, token = NS.CB_SplitOnce(rest, "~")
+            local req = token and NS.pendingSpecListRequests and NS.pendingSpecListRequests[token]
+            if req then
+                req.staging = {}
+            end
+
+        elseif msg and strsub(msg, 1, 20) == "TALENT_SPEC_CURRENT~" then
+            -- Ignored as per design: CleanBot only needs the premade spreads for the dropdown.
+
+        elseif msg and strsub(msg, 1, 17) == "TALENT_SPEC_ITEM~" then
+            -- TALENT_SPEC_ITEM~<botName>~<token>~<specIndex>~<encodedSpecName>~<build>
+            local rest = strsub(msg, 18)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, r3   = NS.CB_SplitOnce(r2, "~")
+            local req = token and NS.pendingSpecListRequests and NS.pendingSpecListRequests[token]
+            if req then
+                local specIndex, r4 = NS.CB_SplitOnce(r3, "~")
+                local encName, build = NS.CB_SplitOnce(r4, "~")
+                local specName = CB_UrlDecode(encName)
+                local t1, t2, t3 = (build or ""):match("(%d+)%-(%d+)%-(%d+)")
+                if specName and specName ~= "" and t1 and t2 and t3 then
+                    req.staging[#req.staging + 1] = {
+                        name = specName,
+                        t    = { tonumber(t1), tonumber(t2), tonumber(t3) },
+                    }
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 16) == "TALENT_SPEC_END~" then
+            local rest = strsub(msg, 17)
+            local rawName, token = NS.CB_SplitOnce(rest, "~")
+            local req = token and NS.pendingSpecListRequests and NS.pendingSpecListRequests[token]
+            if req then
+                NS.pendingSpecListRequests[token] = nil
+                local cls = req.class
+                if cls then
+                    NS.premadeSpecsFetching[cls] = nil
+                    NS.premadeSpecs[cls] = req.staging or {}
+                end
+                if req.key and NS.CB_SyncTalentSpec then
+                    NS.CB_SyncTalentSpec(req.key)
                 end
             end
         end
