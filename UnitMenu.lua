@@ -18,6 +18,7 @@ local CB_HANDLERS = {
     CB_SUMMON    = function(_,   name) NS.CB_SendBotCommand(name, "summon") end,
     CB_INVENTORY = function(key, name) NS.CB_RequestInventory(key, name, "CENTER") end,
     CB_SPELLBOOK = function(key, name) NS.CB_ToggleSpellbook(key, name, "CENTER") end,
+    CB_PROFESSIONS = function(key, name) NS.CB_ToggleProfessions(key, name, "CENTER") end,
     CB_MANAGE    = function(key)       NS.CB_ManageBot(key) end,
     CB_QUESTLOG  = function(key, name) NS.CB_ToggleQuests(key, name, "CENTER") end,
 }
@@ -25,11 +26,12 @@ local CB_HANDLERS = {
 -- ── 1. Register the menu buttons ────────────────────────────────────────────
 -- `dist = 0` means no distance requirement (the actions route over the bridge /
 -- whisper, not a proximity interaction).
-UnitPopupButtons["CB_SUMMON"]    = { text = "Summon",    dist = 0 }
-UnitPopupButtons["CB_INVENTORY"] = { text = "Inventory", dist = 0 }
-UnitPopupButtons["CB_SPELLBOOK"] = { text = "Spellbook", dist = 0 }
-UnitPopupButtons["CB_MANAGE"]    = { text = "Manage",    dist = 0 }
-UnitPopupButtons["CB_QUESTLOG"]  = { text = "Quest Log", dist = 0 }
+UnitPopupButtons["CB_SUMMON"]      = { text = "Summon",      dist = 0 }
+UnitPopupButtons["CB_INVENTORY"]   = { text = "Inventory",   dist = 0 }
+UnitPopupButtons["CB_SPELLBOOK"]   = { text = "Spellbook",   dist = 0 }
+UnitPopupButtons["CB_PROFESSIONS"] = { text = "Professions", dist = 0 }
+UnitPopupButtons["CB_MANAGE"]      = { text = "Manage",      dist = 0 }
+UnitPopupButtons["CB_QUESTLOG"]    = { text = "Quest Log",   dist = 0 }
 
 -- ── 2. Splice the buttons into the party/raid menus in the requested order ──
 -- Inserts are by anchor-key lookup (recomputed each call) so they survive both
@@ -62,6 +64,7 @@ for _, which in ipairs({ "PARTY", "RAID_PLAYER" }) do
         insertAfter(menu, "INSPECT", "CB_MANAGE")   -- right after Inspect
         insertAfter(menu, "TRADE",   "CB_INVENTORY")-- right after Trade
         insertAfter(menu, "CB_INVENTORY", "CB_SPELLBOOK") -- right after Inventory
+        insertAfter(menu, "CB_SPELLBOOK", "CB_PROFESSIONS") -- right after Spellbook
         insertBeforeCancel(menu, "CB_QUESTLOG")     -- last, above Cancel
     end
 end
@@ -90,7 +93,7 @@ hooksecurefunc("UnitPopup_HideButtons", function()
     for index, value in ipairs(menu) do
         if CB_HANDLERS[value] then
             local show = isBot
-            if value == "CB_SPELLBOOK" and not isBridge then
+            if (value == "CB_SPELLBOOK" or value == "CB_PROFESSIONS") and not isBridge then
                 show = false
             end
             UnitPopupShown[UIDROPDOWNMENU_MENU_LEVEL][index] = show and 1 or 0

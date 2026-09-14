@@ -86,6 +86,8 @@ Not routed via `CB_SendBotCommand`; bridge when `present` with exact bag/slot co
 | `RUN~ITEM_DESTROY~<bot>~<token>~<bag>~<slot>~<itemId>~<count>` | `ITEM_DESTROY_V1` | `INVENTORY_ITEM_DESTROY~` | Destroy (`CB_BridgeDestroyItem`); whisper `destroy <link>` only when absent |
 | `RUN~ITEM_DEPOSIT_EXACT~<bot>~<token>~BANK_DEPOSIT\|GBANK_DEPOSIT~<bag>~<slot>~<itemId>~<count>` | `ITEM_DEPOSIT_EXACT_V1` | `ITEM_DEPOSIT_EXACT~` | Deposit to personal / guild bank (`CB_BridgeDepositItem`); whisper `bank <link>` / `guild bank <link>` only when absent |
 | `RUN~FORMATION~GROUP~~<token>~<formation>` | — | `FORMATION_ACK~` | Set group formation (8 tokens: `arrow`, `queue`, `near`, `melee`, `line`, `circle`, `chaos`, `shield`); `far` and absent fallback to `PARTY`/`RAID` |
+| `RUN~CRAFT_RECIPE~<bot>~<token>~<skillId>~<spellId>~<itemId>` | — | `PROFESSION_RECIPE_CRAFT~` | Craft recipe without item target (`CB_BridgeCraftRecipe`) |
+| `RUN~CRAFT_RECIPE_TARGET~<token>~<bot>~<skillId>~<spellId>~<bag>~<slot>~<itemId>` | — | `CRAFT_RECIPE_TARGET_RESULT~` | Craft recipe targeting inventory or equipment slot (`CB_BridgeCraftRecipeTarget`; bag 255 for paperdoll) |
 
 Queries (`co ?`, `nc ?`, `ll ?`, plus `items` / `quests all` / `bank` / `stats` / `formation ?` / `talents spec list` when bridge is absent) are never
 allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as usual. When bridge is present, `stats` routes cleanly via `GET~STATS~<botName>`, formations route via `GET~FORMATIONS~GROUP~~<token>`, and premade specs route via `GET~TALENT_SPEC_LIST~<botName>~<token>`.
@@ -106,6 +108,8 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~STATS~<botName>` | Bot stats (level, money, bags, durability, XP, mana) | `STATS~` |
 | `GET~FORMATIONS~GROUP~~<token>` | Bot movement formations for all group bots | `FORMATIONS_BEGIN~` / `FORMATIONS_ITEM~` / `FORMATIONS_END~` |
 | `GET~TALENT_SPEC_LIST~<botName>~<token>` | Premade talent specs for bot's class and level | `TALENT_SPEC_BEGIN~` / `TALENT_SPEC_CURRENT~` / `TALENT_SPEC_ITEM~` / `TALENT_SPEC_END~` |
+| `GET~PROFESSION~<botName>` | Bot's learned professions and current/max skill ranks | `PROFESSION~` |
+| `GET~PROFESSION_RECIPES~<botName>~<skillId>~<token>` | Recipes learned by bot for specified skillId | `PROFESSION_RECIPES_BEGIN~` / `PROFESSION_RECIPES_ITEM~` / `PROFESSION_RECIPES_END~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
 `CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).
@@ -161,6 +165,12 @@ them. `<token>` fields are request-correlation echoes and are skipped on parse.
 | `INVENTORY_ITEM_USE~<bot>~<token>~<OK/ERR>~<reason>` | use result | Reconciles inventory |
 | `INVENTORY_ITEM_DESTROY~<bot>~<token>~<OK/ERR>~<reason>` | destroy result | Reconciles inventory |
 | `ITEM_DEPOSIT_EXACT~<bot>~<token>~<status>~<reason>~<action>~<bag>~<slot>~<itemId>~<count>~<moved>` | deposit result | Reconciles inventory and bank |
+| `PROFESSION~<botName>~<profs>` | Semicolon-separated list: `<profKey>:<cur>/<max>;...` | Updates `entry.professions`, triggers `CB_OnProfessionsUpdated` |
+| `PROFESSION_RECIPES_BEGIN~<bot>~<token>~<skillId>` | — | Resets profession recipe staging buffer |
+| `PROFESSION_RECIPES_ITEM~<bot>~<token>~<skillId>~<spellId>~<itemId>~<difficulty>~<craftable>~<materials>` | Recipe metadata + reagents (`<matId>:<reqCount>:<availCount>;...`). Name, icon, and subType are client-resolved via `GetSpellInfo`/`GetItemInfo` | Staged into recipe list |
+| `PROFESSION_RECIPES_END~<bot>~<token>~<skillId>` | — | Finalizes recipe cache and renders |
+| `PROFESSION_RECIPE_CRAFT~<bot>~<token>~<skillId>~<spellId>~<itemId>~<OK/ERR>~<reason>` | Craft dispatch result | Confirms craft start or reports error; starts craft watcher |
+| `CRAFT_RECIPE_TARGET_RESULT~<token>~<bot>~<OK/ERR>~<reason>~<skillId>~<spellId>~<bag>~<slot>~<itemId>` | Target craft result | Confirms enchant start or reports error; starts craft watcher |
 
 ---
 

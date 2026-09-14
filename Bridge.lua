@@ -762,6 +762,52 @@ NS.WHISPER_SILENCE = 0.5
 -- Prevents getting stuck forever if a bot drops a reply, while avoiding premature
 -- retries when queued behind earlier commands in the serial whisper queue.
 NS.QUERY_TIMEOUT = 10.0
+NS.PROFESSIONS_TTL = 30.0
+
+-- Profession skill IDs and canonical names matching MultiBotBridge.cpp:704-719
+NS.PROF_SKILL_IDS = {
+    alchemy        = 171,
+    blacksmithing  = 164,
+    enchanting     = 333,
+    engineering    = 202,
+    herbalism      = 182,
+    inscription    = 773,
+    jewelcrafting  = 755,
+    leatherworking = 165,
+    mining         = 186,
+    skinning       = 393,
+    tailoring      = 197,
+    cooking        = 185,
+    firstaid       = 129,
+    fishing        = 356,
+}
+
+NS.PROF_CANONICAL_NAMES = {
+    alchemy        = "Alchemy",
+    blacksmithing  = "Blacksmithing",
+    enchanting     = "Enchanting",
+    engineering    = "Engineering",
+    herbalism      = "Herbalism",
+    inscription    = "Inscription",
+    jewelcrafting  = "Jewelcrafting",
+    leatherworking = "Leatherworking",
+    mining         = "Mining",
+    skinning       = "Skinning",
+    tailoring      = "Tailoring",
+    cooking        = "Cooking",
+    firstaid       = "First Aid",
+    fishing        = "Fishing",
+}
+
+NS.PROF_NAME_TO_SKILL_ID = {}
+for k, v in pairs(NS.PROF_SKILL_IDS) do
+    NS.PROF_NAME_TO_SKILL_ID[k] = v
+    local cName = NS.PROF_CANONICAL_NAMES[k]
+    if cName then
+        NS.PROF_NAME_TO_SKILL_ID[cName] = v
+        NS.PROF_NAME_TO_SKILL_ID[cName:lower()] = v
+    end
+end
 
 -- ── Per-bot serial whisper queue ─────────────────────────────────────────
 -- A bot's reply (items / bank / stats list, a "Strategies:" line, a "put X to bank"
@@ -921,6 +967,14 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             end
         end
 
+        if entry.awaitingProfessions then
+            entry.professionsTimeout = (entry.professionsTimeout or 0) + dt
+            if entry.professionsTimeout >= NS.QUERY_TIMEOUT then
+                entry.awaitingProfessions = false
+                entry.professionsTimeout  = 0
+            end
+        end
+
         -- Deposit/withdraw ("bank <link>") completion: arms the no-banker popup for the op
         -- window; cleared after silence (timer reset on each whisper from this bot, below).
         if entry.awaitingBankOp then
@@ -978,6 +1032,42 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
         end
     end
 
+    -- Safety net for in-flight Bridge recipe list requests (clears pending request on timeout)
+    if NS.pendingRecipeRequests then
+        local now = GetTime()
+        for token, req in pairs(NS.pendingRecipeRequests) do
+            if now >= (req.expires or 0) then
+                NS.pendingRecipeRequests[token] = nil
+            end
+        end
+    end
+
+    -- Safety net for in-flight Bridge craft requests (clears pending request on timeout)
+    if NS.craftPending then
+        local now = GetTime()
+        for token, req in pairs(NS.craftPending) do
+            if now - (req.sentAt or 0) >= (NS.QUERY_TIMEOUT or 10.0) then
+                NS.craftPending[token] = nil
+                if req.callback then
+                    req.callback(false, "TIMEOUT", req.itemId)
+                end
+            end
+        end
+    end
+
+    -- Safety net for in-flight Bridge craft target requests (clears pending request on timeout)
+    if NS.craftTargetPending then
+        local now = GetTime()
+        for token, req in pairs(NS.craftTargetPending) do
+            if now - (req.sentAt or 0) >= (NS.QUERY_TIMEOUT or 10.0) then
+                NS.craftTargetPending[token] = nil
+                if req.callback then
+                    req.callback(false, "TIMEOUT", req.targetItemId)
+                end
+            end
+        end
+    end
+
     -- Safety net for in-flight Bridge formations query (clears flags on network drop/timeout)
     if NS.formationsPending then
         NS.formationsTimeout = (NS.formationsTimeout or 0) + dt
@@ -1007,6 +1097,149 @@ local invSeq = 0
 local function CB_NextInvToken(prefix)
     invSeq = (invSeq or 0) + 1
     return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "inv") .. "-" .. tostring(invSeq)
+end
+
+local recSeq = 0
+local function CB_NextRecToken(prefix)
+    recSeq = (recSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "rec") .. "-" .. tostring(recSeq)
+end
+
+NS.CB_FetchProfessions = function(key, botName, force)
+    if not key then return end
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+    local now = GetTime()
+    if not force then
+        if entry.professionsAt and (now - entry.professionsAt) < (NS.PROFESSIONS_TTL or 30.0) then
+            return
+        end
+        if entry.awaitingProfessions and (entry.professionsTimeout or 0) < (NS.QUERY_TIMEOUT or 10.0) then
+            return
+        end
+    end
+    local bName = (entry and entry.name) or botName or key
+    entry.awaitingProfessions = true
+    entry.professionsTimeout  = 0
+    CB_SendBridge(string.format("GET~PROFESSION~%s", bName))
+end
+
+NS.CB_FetchProfessionRecipes = function(key, botName, skillId, force)
+    if not key or not skillId then return end
+    local sId = tonumber(skillId)
+    if not sId or sId <= 0 then return end
+    local entry = CleanBot_PartyBots[key]
+    if not entry then return end
+
+    entry.professionRecipes = entry.professionRecipes or {}
+    local cached = entry.professionRecipes[sId]
+    local now = GetTime()
+    if not force and cached and cached.recipes and (now - (cached.timestamp or 0)) < (NS.PROFESSIONS_TTL or 30.0) then
+        if NS.CB_OnProfessionRecipesLoaded then
+            NS.CB_OnProfessionRecipesLoaded(key, sId, cached.recipes)
+        end
+        return
+    end
+
+    local bName = (entry and entry.name) or botName or key
+    local token = CB_NextRecToken("rec")
+    NS.pendingRecipeRequests = NS.pendingRecipeRequests or {}
+    NS.pendingRecipeRequests[token] = {
+        botKey    = key,
+        botName   = bName,
+        skillId   = sId,
+        expires   = now + (NS.QUERY_TIMEOUT or 10.0),
+        staging   = {},
+    }
+    CB_SendBridge(string.format("GET~PROFESSION_RECIPES~%s~%d~%s", bName, sId, token))
+end
+
+local craftSeq = 0
+local function CB_NextCraftToken(prefix)
+    craftSeq = (craftSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "crf") .. "-" .. tostring(craftSeq)
+end
+
+--- Orders a bot to craft a profession recipe via Bridge (RUN~CRAFT_RECIPE~<botName>~<token>~<skillId>~<spellId>~<itemId>).
+---@param key      string Bot name-key.
+---@param botName  string Bot display name.
+---@param skillId  number Skill line ID (e.g. 202 for Engineering).
+---@param spellId  number Recipe spell ID.
+---@param itemId   number Expected created item ID (or 0).
+---@param callback function? Optional completion callback: function(success: boolean, reason: string, actualItemId: number).
+---@return boolean true if sent, false otherwise.
+NS.CB_BridgeCraftRecipe = function(key, botName, skillId, spellId, itemId, callback)
+    if not key or not skillId or not spellId then return false end
+    local sId = tonumber(skillId)
+    local spId = tonumber(spellId)
+    local itId = tonumber(itemId) or 0
+    if not sId or sId <= 0 or not spId or spId <= 0 then return false end
+
+    if CB_EffectiveBridgeState() ~= "present" then
+        return false
+    end
+
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local bName = (entry and entry.name) or botName or key
+    local token = CB_NextCraftToken("crf")
+
+    NS.craftPending = NS.craftPending or {}
+    NS.craftPending[token] = {
+        botKey   = key,
+        botName  = bName,
+        skillId  = sId,
+        spellId  = spId,
+        itemId   = itId,
+        callback = callback,
+        sentAt   = GetTime(),
+    }
+
+    CB_SendBridge(string.format("RUN~CRAFT_RECIPE~%s~%s~%d~%d~%d", bName, token, sId, spId, itId))
+    return true
+end
+
+--- Orders a bot to cast a target-based recipe (e.g. Enchanting) via Bridge (RUN~CRAFT_RECIPE_TARGET~<token>~<botName>~<skillId>~<spellId>~<targetBag>~<targetSlot>~<targetItemId>).
+---@param key          string Bot name-key.
+---@param botName      string Bot display name.
+---@param skillId      number Skill line ID (e.g. 333 for Enchanting).
+---@param spellId      number Recipe spell ID.
+---@param targetBag    number Target item bag (255 for equipped or backpack).
+---@param targetSlot   number Target item slot (0..18 for equipped, 0-indexed).
+---@param targetItemId number Target item entry ID.
+---@param callback     function? Optional completion callback: function(success: boolean, reason: string, targetItemId: number).
+---@return boolean true if sent, false otherwise.
+NS.CB_BridgeCraftRecipeTarget = function(key, botName, skillId, spellId, targetBag, targetSlot, targetItemId, callback)
+    if not key or not skillId or not spellId or targetSlot == nil or not targetItemId then return false end
+    local sId = tonumber(skillId)
+    local spId = tonumber(spellId)
+    local tBag = tonumber(targetBag) or 255
+    local tSlot = tonumber(targetSlot)
+    local tItemId = tonumber(targetItemId)
+    if not sId or sId <= 0 or not spId or spId <= 0 or not tSlot or tSlot < 0 or not tItemId or tItemId <= 0 then return false end
+
+    if CB_EffectiveBridgeState() ~= "present" then
+        return false
+    end
+
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local bName = (entry and entry.name) or botName or key
+    local token = CB_NextCraftToken("crt")
+
+    NS.craftTargetPending = NS.craftTargetPending or {}
+    NS.craftTargetPending[token] = {
+        botKey       = key,
+        botName      = bName,
+        skillId      = sId,
+        spellId      = spId,
+        targetBag    = tBag,
+        targetSlot   = tSlot,
+        targetItemId = tItemId,
+        callback     = callback,
+        sentAt       = GetTime(),
+    }
+
+    CB_SendBridge(string.format("RUN~CRAFT_RECIPE_TARGET~%s~%s~%d~%d~%d~%d~%d", token, bName, sId, spId, tBag, tSlot, tItemId))
+    return true
 end
 
 -- Performs the actual inventory fetch (sets the busy flag + sends). Runs from the serial
@@ -2736,6 +2969,214 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 end
                 if req.key and NS.CB_SyncTalentSpec then
                     NS.CB_SyncTalentSpec(req.key)
+                end
+            end
+
+        -- ── Bot profession list packet (GET~PROFESSION) ─────────────────────
+        elseif msg and strsub(msg, 1, 11) == "PROFESSION~" then
+            local rest = strsub(msg, 12)
+            local rawName, profsStr = NS.CB_SplitOnce(rest, "~")
+            local botName = CB_UrlDecode(rawName):match("^%s*(.-)%s*$")
+            local key = strlower(botName)
+            local entry = CleanBot_PartyBots[key]
+            if entry then
+                entry.awaitingProfessions = false
+                entry.professionsTimeout  = 0
+                entry.professionsAt       = GetTime()
+                local list = {}
+                if profsStr and profsStr ~= "" then
+                    for item in string.gmatch(profsStr, "([^;]+)") do
+                        local decItem = CB_UrlDecode(item)
+                        local profKey, cur, max = decItem:match("^(%a+):(%d+)/(%d+)$")
+                        if profKey then
+                            local sId = NS.PROF_SKILL_IDS and NS.PROF_SKILL_IDS[profKey]
+                            local pName = (NS.PROF_CANONICAL_NAMES and NS.PROF_CANONICAL_NAMES[profKey])
+                                or (profKey:sub(1,1):upper() .. profKey:sub(2))
+                            table.insert(list, {
+                                key     = profKey,
+                                name    = pName,
+                                cur     = tonumber(cur) or 0,
+                                max     = tonumber(max) or 0,
+                                skillId = sId,
+                            })
+                        end
+                    end
+                end
+                entry.professions = list
+                if NS.CB_OnProfessionsUpdated then
+                    NS.CB_OnProfessionsUpdated(key)
+                end
+            end
+
+        -- ── Profession recipe streaming packets (GET~PROFESSION_RECIPES) ───
+        elseif msg and strsub(msg, 1, 25) == "PROFESSION_RECIPES_BEGIN~" then
+            local rest = strsub(msg, 26)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, skillId = NS.CB_SplitOnce(r2, "~")
+            local req = token and NS.pendingRecipeRequests and NS.pendingRecipeRequests[token]
+            if req then
+                req.staging = {}
+            end
+
+        elseif msg and strsub(msg, 1, 24) == "PROFESSION_RECIPES_ITEM~" then
+            -- PROFESSION_RECIPES_ITEM~<botName>~<token>~<skillId>~<spellId>~<itemId>~<difficulty>~<craftable>~<materials>
+            local rest = strsub(msg, 25)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, r3   = NS.CB_SplitOnce(r2, "~")
+            local req = token and NS.pendingRecipeRequests and NS.pendingRecipeRequests[token]
+            if req then
+                local skillId, r4     = NS.CB_SplitOnce(r3, "~")
+                local spellId, r5     = NS.CB_SplitOnce(r4, "~")
+                local itemId, r6      = NS.CB_SplitOnce(r5, "~")
+                local diffEnc, r7     = NS.CB_SplitOnce(r6, "~")
+                local craftable, mEnc = NS.CB_SplitOnce(r7, "~")
+
+                local sId = tonumber(spellId) or 0
+                local iId = tonumber(itemId) or 0
+                local diff = CB_UrlDecode(diffEnc or ""):lower()
+                local numAvail = tonumber(craftable) or 0
+                local rawMats = CB_UrlDecode(mEnc or "")
+
+                local reagents = {}
+                if rawMats ~= "" then
+                    for chunk in string.gmatch(rawMats, "([^;]+)") do
+                        local matId, reqCount, availCount = chunk:match("^(%d+):(%d+):(%d+)$")
+                        if matId then
+                            local mId = tonumber(matId)
+                            local mName, mQuality, mIcon
+                            if GetItemInfo then
+                                local name, _, qual, _, _, _, _, _, _, tex = GetItemInfo(mId)
+                                mName, mQuality, mIcon = name, qual, tex
+                            end
+                            table.insert(reagents, {
+                                itemId    = mId,
+                                count     = tonumber(reqCount) or 1,
+                                available = tonumber(availCount) or 0,
+                                name      = mName or ("Item #" .. mId),
+                                icon      = mIcon or "Interface\\Icons\\INV_Misc_QuestionMark",
+                                quality   = mQuality or 1,
+                            })
+                        end
+                    end
+                end
+
+                local spName, spIcon
+                if GetSpellInfo then
+                    local name, _, tex = GetSpellInfo(sId)
+                    spName, spIcon = name, tex
+                end
+
+                local itName, itQuality, itSubType, itIcon
+                if iId > 0 and GetItemInfo then
+                    local name, _, qual, _, _, _, subType, _, _, tex = GetItemInfo(iId)
+                    itName, itQuality, itSubType, itIcon = name, qual, subType, tex
+                end
+
+                local rName = itName or spName or ("Recipe #" .. sId)
+                local rIcon = (iId > 0 and itIcon) or spIcon or "Interface\\Icons\\INV_Misc_QuestionMark"
+                local rSubtype = (itSubType and itSubType ~= "") and itSubType or "Miscellaneous"
+
+                -- Only include genuine craftable recipes or item enchantments.
+                -- Filters out profession launcher abilities (e.g. "Tailoring") and utility spells (e.g. "Disenchant").
+                if iId > 0 or #reagents > 0 then
+                    table.insert(req.staging, {
+                        spellId      = sId,
+                        itemId       = iId,
+                        name         = rName,
+                        icon         = rIcon,
+                        difficulty   = diff,
+                        subType      = rSubtype,
+                        craftable    = numAvail,
+                        numAvailable = numAvail,
+                        reagents     = reagents,
+                        quality      = itQuality or 1,
+                    })
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 23) == "PROFESSION_RECIPES_END~" then
+            local rest = strsub(msg, 24)
+            local rawName, r2 = NS.CB_SplitOnce(rest, "~")
+            local token, skillId = NS.CB_SplitOnce(r2, "~")
+            local req = token and NS.pendingRecipeRequests and NS.pendingRecipeRequests[token]
+            if req then
+                NS.pendingRecipeRequests[token] = nil
+                local entry = CleanBot_PartyBots[req.botKey]
+                if entry then
+                    entry.professionRecipes = entry.professionRecipes or {}
+                    entry.professionRecipes[req.skillId] = {
+                        timestamp = GetTime(),
+                        recipes   = req.staging,
+                    }
+                end
+                if NS.CB_OnProfessionRecipesLoaded then
+                    NS.CB_OnProfessionRecipesLoaded(req.botKey, req.skillId, req.staging)
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 24) == "PROFESSION_RECIPE_CRAFT~" then
+            local rest = strsub(msg, 25)
+            local rawName, r1 = NS.CB_SplitOnce(rest, "~")
+            local token, r2 = NS.CB_SplitOnce(r1, "~")
+            local skillId, r3 = NS.CB_SplitOnce(r2, "~")
+            local spellId, r4 = NS.CB_SplitOnce(r3, "~")
+            local actualItemId, r5 = NS.CB_SplitOnce(r4, "~")
+            local status, reason = NS.CB_SplitOnce(r5, "~")
+
+            local botName = rawName and CB_UrlDecode(rawName) or rawName
+            local decReason = reason and CB_UrlDecode(reason) or ""
+            local isOk = (status == "OK")
+
+            local pending = token and NS.craftPending and NS.craftPending[token]
+            if pending then
+                NS.craftPending[token] = nil
+                if pending.callback then
+                    pending.callback(isOk, decReason, tonumber(actualItemId))
+                end
+            end
+
+            if isOk then
+                if NS.CB_Print then
+                    NS.CB_Print(string.format("%s begins crafting.", botName or "Bot"))
+                end
+            else
+                if NS.CB_Print then
+                    local errMsg = decReason ~= "" and decReason or "FAILED"
+                    NS.CB_Print(string.format("%s cannot craft: %s.", botName or "Bot", errMsg))
+                end
+            end
+
+        elseif msg and strsub(msg, 1, 27) == "CRAFT_RECIPE_TARGET_RESULT~" then
+            local rest = strsub(msg, 28)
+            local token, r1 = NS.CB_SplitOnce(rest, "~")
+            local rawName, r2 = NS.CB_SplitOnce(r1, "~")
+            local status, r3 = NS.CB_SplitOnce(r2, "~")
+            local reason, r4 = NS.CB_SplitOnce(r3, "~")
+            local skillId, r5 = NS.CB_SplitOnce(r4, "~")
+            local spellId, r6 = NS.CB_SplitOnce(r5, "~")
+            local targetBag, r7 = NS.CB_SplitOnce(r6, "~")
+            local targetSlot, targetItemId = NS.CB_SplitOnce(r7, "~")
+
+            local botName = rawName and CB_UrlDecode(rawName) or rawName
+            local decReason = reason and CB_UrlDecode(reason) or ""
+            local isOk = (status == "OK")
+
+            local pending = token and NS.craftTargetPending and NS.craftTargetPending[token]
+            if pending then
+                NS.craftTargetPending[token] = nil
+                if pending.callback then
+                    pending.callback(isOk, decReason, tonumber(targetItemId))
+                end
+            end
+
+            if isOk then
+                if NS.CB_Print then
+                    NS.CB_Print(string.format("%s begins enchanting.", botName or "Bot"))
+                end
+            else
+                if NS.CB_Print then
+                    local errMsg = decReason ~= "" and decReason or "FAILED"
+                    NS.CB_Print(string.format("%s cannot enchant: %s.", botName or "Bot", errMsg))
                 end
             end
         end

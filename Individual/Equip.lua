@@ -325,6 +325,10 @@ NS.CB_CreateEquipSlots = function(slot, model)
     if NS.CB_CreateSpellbookButton then
         NS.CB_CreateSpellbookButton(slot, model, slotSize)
     end
+    if NS.CB_CreateProfessionsButton then
+        NS.CB_CreateProfessionsButton(slot, model, slotSize)
+    end
+
 
     -- ── XP bar — spans the bottom button row, touching it ──────────
     -- Anchored from the bag button's left edge to the quest button's right edge,

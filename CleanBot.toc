@@ -24,6 +24,7 @@ Individual\EquipData.lua
 Individual\Inventory.lua
 Individual\Quest.lua
 Individual\Spellbook.lua
+Individual\Professions.lua
 Individual\Equip.lua
 Individual\Model.lua
 Individual\Individual.lua

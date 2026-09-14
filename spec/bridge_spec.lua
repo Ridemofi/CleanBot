@@ -16,6 +16,7 @@ if not CleanBotNS.CB_EnqueueRequest then dofile("Bridge.lua") end
 -- The ROSTER~ handler seeds entries via CB_DefaultCombat/CB_DefaultClassData.
 if not CleanBotNS.STRATEGY_MAP   then dofile("Individual/Strategies.lua") end
 if not CleanBotNS.SPEC_DPS_TOKEN then dofile("Individual/ClassData.lua") end
+if not CleanBotNS.CB_BuildProfessionRecipeTree then dofile("Individual/Professions.lua") end
 local NS = CleanBotNS
 
 -- Item line as the bot streams it (the "items"/"bank" reply format).
@@ -899,5 +900,349 @@ describe("Talent spec list bridge routing and handling", function()
         assert.equals(1, #NS.premadeSpecs["MAGE"])
         assert.equals("frost pve", NS.premadeSpecs["MAGE"][1].name)
         assert.is_nil(NS.premadeSpecs["WARRIOR"])
+    end)
+end)
+
+describe("Bridge professions and recipes protocol", function()
+    local NS
+
+    before_each(function()
+        Mock.reset()
+        NS = CleanBotNS
+        CleanBot_PartyBots = {
+            artemis = {
+                name = "Artemis",
+                class = "WARRIOR",
+                level = 80,
+            },
+        }
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~2")
+        Mock.party = 1
+        Mock.addon = {}
+    end)
+
+    it("sends GET~PROFESSION query and respects TTL", function()
+        NS.CB_FetchProfessions("artemis", "Artemis")
+        assert.equals(1, #Mock.addon)
+        assert.equals("GET~PROFESSION~Artemis", Mock.addon[1].text)
+
+        -- Immediate second call without force does not duplicate
+        NS.CB_FetchProfessions("artemis", "Artemis")
+        assert.equals(1, #Mock.addon)
+
+        -- Force flag bypasses TTL
+        NS.CB_FetchProfessions("artemis", "Artemis", true)
+        assert.equals(2, #Mock.addon)
+        assert.equals("GET~PROFESSION~Artemis", Mock.addon[2].text)
+    end)
+
+    it("parses PROFESSION~ packet into entry.professions", function()
+        local payload = "PROFESSION~Artemis~engineering:150/225;mining:225/300;cooking:75/150"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", payload)
+
+        local entry = CleanBot_PartyBots.artemis
+        assert.is_not_nil(entry.professions)
+        assert.equals(3, #entry.professions)
+
+        assert.equals("engineering", entry.professions[1].key)
+        assert.equals("Engineering", entry.professions[1].name)
+        assert.equals(150, entry.professions[1].cur)
+        assert.equals(225, entry.professions[1].max)
+        assert.equals(202, entry.professions[1].skillId)
+
+        assert.equals("mining", entry.professions[2].key)
+        assert.equals("Mining", entry.professions[2].name)
+        assert.equals(225, entry.professions[2].cur)
+        assert.equals(300, entry.professions[2].max)
+        assert.equals(186, entry.professions[2].skillId)
+
+        assert.equals("cooking", entry.professions[3].key)
+        assert.equals("Cooking", entry.professions[3].name)
+        assert.equals(75, entry.professions[3].cur)
+        assert.equals(150, entry.professions[3].max)
+        assert.equals(185, entry.professions[3].skillId)
+    end)
+
+    it("streams and collects PROFESSION_RECIPES packets", function()
+        NS.CB_FetchProfessionRecipes("artemis", "Artemis", 202)
+        assert.equals(1, #Mock.addon)
+        local token = Mock.addon[1].text:match("^GET~PROFESSION_RECIPES~Artemis~202~(.+)$")
+        assert.is_not_nil(token)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPES_BEGIN~Artemis~" .. token .. "~202")
+
+        -- Item 1: Gun recipe (orange, craftable 2, 2 copper tubes and 4 bolts)
+        local mats1 = "4359:2:5;4360:4:10"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPES_ITEM~Artemis~" .. token .. "~202~3928~4362~orange~2~" .. mats1)
+
+        -- Item 2: Bomb recipe (yellow, craftable 0)
+        local mats2 = "4359:1:0"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPES_ITEM~Artemis~" .. token .. "~202~3930~4364~yellow~0~" .. mats2)
+
+        -- Item 3: Profession launcher ability / utility spell (Engineering 4036: itemId 0 and no reagents - should be filtered)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPES_ITEM~Artemis~" .. token .. "~202~4036~0~optimal~0~")
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPES_END~Artemis~" .. token .. "~202")
+
+        local entry = CleanBot_PartyBots.artemis
+        assert.is_not_nil(entry.professionRecipes)
+        assert.is_not_nil(entry.professionRecipes[202])
+        local list = entry.professionRecipes[202].recipes
+        assert.equals(2, #list)
+
+        assert.equals(3928, list[1].spellId)
+        assert.equals(4362, list[1].itemId)
+        assert.equals("orange", list[1].difficulty)
+        assert.equals(2, list[1].numAvailable)
+        assert.equals(2, #list[1].reagents)
+        assert.equals(4359, list[1].reagents[1].itemId)
+        assert.equals(2, list[1].reagents[1].count)
+        assert.equals(5, list[1].reagents[1].available)
+
+        assert.equals(3930, list[2].spellId)
+        assert.equals("yellow", list[2].difficulty)
+        assert.equals(0, list[2].numAvailable)
+    end)
+
+    it("prunes timed out recipe requests after QUERY_TIMEOUT", function()
+        NS.CB_FetchProfessionRecipes("artemis", "Artemis", 202)
+        local token = Mock.addon[1].text:match("^GET~PROFESSION_RECIPES~Artemis~202~(.+)$")
+        assert.is_not_nil(NS.pendingRecipeRequests[token])
+
+        -- Advance time by 11 seconds
+        Mock.tick(11)
+
+        assert.is_nil(NS.pendingRecipeRequests[token])
+    end)
+
+    it("builds recipe tree grouped by subType and sorted by difficulty", function()
+        local raw = {
+            { name = "Rough Dynamite", difficulty = "gray",   subType = "Explosives" },
+            { name = "Iron Grenade",   difficulty = "yellow", subType = "Explosives" },
+            { name = "Flash Powder",   difficulty = "orange", subType = "Explosives" },
+            { name = "Copper Tube",    difficulty = "green",  subType = "Parts" },
+            { name = "Copper Mod",     difficulty = "orange", subType = "Parts" },
+            { name = "Secret Device",  difficulty = "orange", subType = nil }, -- Should go to Miscellaneous
+        }
+
+        local tree = NS.CB_BuildProfessionRecipeTree(raw)
+        assert.is_not_nil(tree)
+        assert.equals(3, #tree)
+
+        -- Categories: Explosives, Parts, Miscellaneous (Miscellaneous always last)
+        assert.equals("Explosives", tree[1].name)
+        assert.equals("Parts", tree[2].name)
+        assert.equals("Miscellaneous", tree[3].name)
+
+        -- In Explosives: Flash Powder (orange), Iron Grenade (yellow), Rough Dynamite (gray)
+        assert.equals(3, #tree[1].recipes)
+        assert.equals("Flash Powder", tree[1].recipes[1].name)
+        assert.equals("orange", tree[1].recipes[1].difficulty)
+        assert.equals("Iron Grenade", tree[1].recipes[2].name)
+        assert.equals("yellow", tree[1].recipes[2].difficulty)
+        assert.equals("Rough Dynamite", tree[1].recipes[3].name)
+        assert.equals("gray", tree[1].recipes[3].difficulty)
+
+        -- In Parts: Copper Mod (orange), Copper Tube (green)
+        assert.equals(2, #tree[2].recipes)
+        assert.equals("Copper Mod", tree[2].recipes[1].name)
+        assert.equals("orange", tree[2].recipes[1].difficulty)
+        assert.equals("Copper Tube", tree[2].recipes[2].name)
+        assert.equals("green", tree[2].recipes[2].difficulty)
+
+        -- In Miscellaneous: Secret Device (orange)
+        assert.equals(1, #tree[3].recipes)
+        assert.equals("Secret Device", tree[3].recipes[1].name)
+    end)
+end)
+
+describe("Bridge craft recipe (RUN~CRAFT_RECIPE and PROFESSION_RECIPE_CRAFT)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = { name = "Artemis" },
+        }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        NS.craftPending = {}
+        Mock.party = 1
+    end)
+
+    it("sends RUN~CRAFT_RECIPE with expected fields when bridge is present", function()
+        local ok = NS.CB_BridgeCraftRecipe("artemis", "Artemis", 202, 3918, 4358)
+        assert.is_true(ok)
+        assert.equals(1, #Mock.addon)
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE~Artemis~([^~]+)~202~3918~4358$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.craftPending[token])
+        assert.equals(202, NS.craftPending[token].skillId)
+        assert.equals(3918, NS.craftPending[token].spellId)
+        assert.equals(4358, NS.craftPending[token].itemId)
+    end)
+
+    it("handles PROFESSION_RECIPE_CRAFT OK response and invokes callback", function()
+        local cbCalled, cbSuccess, cbReason, cbItemId = false, nil, nil, nil
+        NS.CB_BridgeCraftRecipe("artemis", "Artemis", 202, 3918, 4358, function(success, reason, itId)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+            cbItemId = itId
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE~Artemis~([^~]+)~202~3918~4358$")
+        assert.is_not_nil(token)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPE_CRAFT~Artemis~" .. token .. "~202~3918~4358~OK~OK")
+
+        assert.is_true(cbCalled)
+        assert.is_true(cbSuccess)
+        assert.equals("OK", cbReason)
+        assert.equals(4358, cbItemId)
+        assert.is_nil(NS.craftPending[token])
+    end)
+
+    it("handles PROFESSION_RECIPE_CRAFT ERR response and cleans pending token", function()
+        local cbCalled, cbSuccess, cbReason = false, nil, nil
+        NS.CB_BridgeCraftRecipe("artemis", "Artemis", 202, 3918, 4358, function(success, reason)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE~Artemis~([^~]+)~202~3918~4358$")
+        assert.is_not_nil(token)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "PROFESSION_RECIPE_CRAFT~Artemis~" .. token .. "~202~3918~4358~ERR~NO_MATERIALS")
+
+        assert.is_true(cbCalled)
+        assert.is_false(cbSuccess)
+        assert.equals("NO_MATERIALS", cbReason)
+        assert.is_nil(NS.craftPending[token])
+    end)
+
+    it("returns false if bridge is absent", function()
+        NS.bridgeState = "absent"
+        local ok = NS.CB_BridgeCraftRecipe("artemis", "Artemis", 202, 3918, 4358)
+        assert.is_false(ok)
+        assert.equals(0, #Mock.addon)
+    end)
+
+    it("times out pending craft request after QUERY_TIMEOUT", function()
+        local cbCalled, cbSuccess, cbReason = false, nil, nil
+        NS.CB_BridgeCraftRecipe("artemis", "Artemis", 202, 3918, 4358, function(success, reason)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE~Artemis~([^~]+)~202~3918~4358$")
+        assert.is_not_nil(NS.craftPending[token])
+
+        -- Advance time past 10s
+        Mock.tick(11)
+
+        assert.is_nil(NS.craftPending[token])
+        assert.is_true(cbCalled)
+        assert.is_false(cbSuccess)
+        assert.equals("TIMEOUT", cbReason)
+    end)
+end)
+
+describe("Bridge craft recipe target (RUN~CRAFT_RECIPE_TARGET and CRAFT_RECIPE_TARGET_RESULT)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = { name = "Artemis" },
+        }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        NS.craftTargetPending = {}
+        Mock.party = 1
+    end)
+
+    it("sends RUN~CRAFT_RECIPE_TARGET with expected fields when bridge is present", function()
+        local ok = NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 8, 43210)
+        assert.is_true(ok)
+        assert.equals(1, #Mock.addon)
+        assert.equals("MBOT", Mock.addon[1].prefix)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~255~8~43210$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.craftTargetPending[token])
+        assert.equals(333, NS.craftTargetPending[token].skillId)
+        assert.equals(27960, NS.craftTargetPending[token].spellId)
+        assert.equals(255, NS.craftTargetPending[token].targetBag)
+        assert.equals(8, NS.craftTargetPending[token].targetSlot)
+        assert.equals(43210, NS.craftTargetPending[token].targetItemId)
+    end)
+
+    it("accepts slot 0 for head equipment slot", function()
+        local ok = NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 0, 43210)
+        assert.is_true(ok)
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~255~0~43210$")
+        assert.is_not_nil(token)
+        assert.equals(0, NS.craftTargetPending[token].targetSlot)
+    end)
+
+    it("handles CRAFT_RECIPE_TARGET_RESULT OK response and invokes callback", function()
+        local cbCalled, cbSuccess, cbReason, cbItem = false, nil, nil, nil
+        NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 8, 43210, function(success, reason, targetItemId)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+            cbItem = targetItemId
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~255~8~43210$")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "CRAFT_RECIPE_TARGET_RESULT~" .. token .. "~Artemis~OK~OK~333~27960~255~8~43210")
+
+        assert.is_true(cbCalled)
+        assert.is_true(cbSuccess)
+        assert.equals("OK", cbReason)
+        assert.equals(43210, cbItem)
+        assert.is_nil(NS.craftTargetPending[token])
+    end)
+
+    it("handles CRAFT_RECIPE_TARGET_RESULT ERR response and cleans pending token", function()
+        local cbCalled, cbSuccess, cbReason = false, nil, nil
+        NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 8, 43210, function(success, reason)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~255~8~43210$")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "CRAFT_RECIPE_TARGET_RESULT~" .. token .. "~Artemis~ERR~INVALID_TARGET_ITEM~333~27960~255~8~43210")
+
+        assert.is_true(cbCalled)
+        assert.is_false(cbSuccess)
+        assert.equals("INVALID_TARGET_ITEM", cbReason)
+        assert.is_nil(NS.craftTargetPending[token])
+    end)
+
+    it("returns false if bridge is absent", function()
+        NS.bridgeState = "absent"
+        local ok = NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 8, 43210)
+        assert.is_false(ok)
+        assert.equals(0, #Mock.addon)
+    end)
+
+    it("times out pending craft target request after QUERY_TIMEOUT", function()
+        local cbCalled, cbSuccess, cbReason = false, nil, nil
+        NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 255, 8, 43210, function(success, reason)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~255~8~43210$")
+        assert.is_not_nil(NS.craftTargetPending[token])
+
+        Mock.tick(11)
+
+        assert.is_nil(NS.craftTargetPending[token])
+        assert.is_true(cbCalled)
+        assert.is_false(cbSuccess)
+        assert.equals("TIMEOUT", cbReason)
     end)
 end)

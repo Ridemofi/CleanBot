@@ -1011,7 +1011,7 @@ NS.CB_GetSpellbookFrame = function(key, botName)
     -- Red Modern Close Button (Top-Right on the metal bar)
     local closeBtn = CreateFrame("Button", "CleanBotSpellbookClose", f)
     closeBtn:SetSize(24, 24)
-    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, 0)
+    closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", 1, 0)
     closeBtn:SetFrameLevel((f:GetFrameLevel() or 1) + 20)
 
     local nt = closeBtn:CreateTexture(nil, "ARTWORK"); nt:SetAllPoints(); applyAtlas(nt, ATLAS.closeNormal); closeBtn:SetNormalTexture(nt)

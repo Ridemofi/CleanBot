@@ -22,6 +22,7 @@ New here? Start with **[Getting Started](getting-started.md)**.
 - **[Managing Bots](managing-bots.md)** — invite, summon, spawn, recruit, and save bot presets.
 - **[Bot Behavior](bot-behavior.md)** — roles, rotations, movement, and loot.
 - **[Gear & Bags](gear-and-bags.md)** — equipment, inventory, vendors, trading, banking, and quests.
+- **[Professions](professions.md)** — bot profession skill progress, recipes, filters, crafting, and target enchantments.
 - **[Settings](settings.md)** — appearance, behavior toggles, and the action bar.
 
 ## Reference
