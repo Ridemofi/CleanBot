@@ -2734,9 +2734,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     local EQUIP_SLOT_NAMES = {
         [1]  = "Head",
-        [2]  = "Neck",
         [3]  = "Shoulders",
-        [4]  = "Shirt",
         [5]  = "Chest",
         [6]  = "Waist",
         [7]  = "Legs",
@@ -2745,14 +2743,40 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         [10] = "Hands",
         [11] = "Finger 1",
         [12] = "Finger 2",
-        [13] = "Trinket 1",
-        [14] = "Trinket 2",
         [15] = "Back",
         [16] = "Main Hand",
         [17] = "Off Hand",
-        [18] = "Ranged",
     }
-    local EQUIP_SLOT_ORDER = { 1, 3, 5, 9, 10, 8, 15, 16, 17, 18, 11, 12, 2, 6, 7, 13, 14, 4 }
+    local EQUIP_SLOT_ORDER = { 16, 17, 15, 5, 9, 10, 8, 11, 12, 1, 3, 6, 7 }
+
+    local ENCHANTING_VELLUM_IDS = {
+        [37602] = true, -- Armor Vellum
+        [39349] = true, -- Armor Vellum II
+        [43145] = true, -- Armor Vellum III
+        [37603] = true, -- Weapon Vellum
+        [39350] = true, -- Weapon Vellum II
+        [43146] = true, -- Weapon Vellum III
+    }
+
+    local ENCHANTABLE_EQUIP_LOCS = {
+        INVTYPE_2HWEAPON       = true,
+        INVTYPE_WEAPON         = true,
+        INVTYPE_WEAPONMAINHAND = true,
+        INVTYPE_WEAPONOFFHAND  = true,
+        INVTYPE_SHIELD         = true,
+        INVTYPE_HOLDABLE       = true,
+        INVTYPE_CLOAK          = true,
+        INVTYPE_CHEST          = true,
+        INVTYPE_ROBE           = true,
+        INVTYPE_WRIST          = true,
+        INVTYPE_HAND           = true,
+        INVTYPE_FEET           = true,
+        INVTYPE_FINGER         = true,
+        INVTYPE_HEAD           = true,
+        INVTYPE_SHOULDER       = true,
+        INVTYPE_WAIST          = true,
+        INVTYPE_LEGS           = true,
+    }
 
     local function buildTargetPicker(f, anchorBtn)
         if f.TargetPicker then return f.TargetPicker end
@@ -2775,7 +2799,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
         local title = picker:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         title:SetPoint("TOPLEFT", picker, "TOPLEFT", 10, -8)
-        title:SetText("SELECT EQUIPPED ITEM")
+        title:SetText("SELECT TARGET ITEM")
         title:SetTextColor(1, 0.82, 0)
 
         local closeBtn = CreateFrame("Button", nil, picker, "UIPanelCloseButton")
@@ -2785,7 +2809,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
         local emptyText = picker:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         emptyText:SetPoint("CENTER", picker, "CENTER", 0, -6)
-        emptyText:SetText("No equipped items found")
+        emptyText:SetText("No enchantable items found")
         emptyText:Hide()
         picker.emptyText = emptyText
 
@@ -2799,7 +2823,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         content:SetHeight(1)
         scrollFrame:SetScrollChild(content)
 
-        local ROW_H = 26
         local rows = {}
         picker.rows = rows
 
@@ -2816,7 +2839,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
             local effectiveBotName = (entry and entry.name) or f.botName or botKey
             local unit = (NS.CB_FindPartyUnit and NS.CB_FindPartyUnit(effectiveBotName)) or (entry and entry.unit)
 
-            local items = {}
+            local equippedItems = {}
             if unit then
                 for _, slotId in ipairs(EQUIP_SLOT_ORDER) do
                     local link = GetInventoryItemLink(unit, slotId)
@@ -2824,18 +2847,63 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                         local name, _, quality, _, _, _, _, _, _, texture = GetItemInfo(link)
                         local itemId = tonumber(link:match("item:(%d+)"))
                         if itemId and itemId > 0 then
-                            table.insert(items, {
-                                slotId = slotId,
-                                slotName = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. slotId),
-                                itemId = itemId,
-                                link = link,
-                                name = name or ("Item " .. itemId),
-                                quality = quality or 1,
-                                texture = texture or (GetInventoryItemTexture and GetInventoryItemTexture(unit, slotId)) or "Interface\\Icons\\INV_Misc_QuestionMark",
+                            table.insert(equippedItems, {
+                                isEquipped = true,
+                                slotId     = slotId,
+                                targetBag  = 255,
+                                targetSlot = slotId - 1,
+                                slotName   = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. slotId),
+                                itemId     = itemId,
+                                link       = link,
+                                name       = name or ("Item " .. itemId),
+                                quality    = quality or 1,
+                                texture    = texture or (GetInventoryItemTexture and GetInventoryItemTexture(unit, slotId)) or "Interface\\Icons\\INV_Misc_QuestionMark",
                             })
                         end
                     end
                 end
+            end
+
+            local bagItems = {}
+            if entry and entry.inventory and entry.inventory.items then
+                for _, it in ipairs(entry.inventory.items) do
+                    if it.link and it.itemId and it.itemId > 0 then
+                        local name, _, quality, _, _, _, _, _, equipLoc, texture = GetItemInfo(it.link)
+                        local isVellum = ENCHANTING_VELLUM_IDS[it.itemId]
+                        local isEnchantableGear = equipLoc and ENCHANTABLE_EQUIP_LOCS[equipLoc]
+                        if isVellum or isEnchantableGear then
+                            local bagText = (it.bag == 0) and "Backpack" or string.format("Bag %d", it.bag)
+                            if it.count and it.count > 1 then
+                                bagText = string.format("%s (x%d)", bagText, it.count)
+                            end
+                            table.insert(bagItems, {
+                                isEquipped = false,
+                                targetBag  = it.bag,
+                                targetSlot = it.slot,
+                                slotName   = bagText,
+                                itemId     = it.itemId,
+                                link       = it.link,
+                                name       = name or (isVellum and "Enchanting Vellum") or ("Item " .. it.itemId),
+                                quality    = quality or (isVellum and 1) or 1,
+                                texture    = texture or "Interface\\Icons\\INV_Misc_QuestionMark",
+                            })
+                        end
+                    end
+                end
+            end
+
+            local items = {}
+            if #equippedItems > 0 and #bagItems > 0 then
+                table.insert(items, { isHeader = true, title = "EQUIPPED" })
+                for _, it in ipairs(equippedItems) do table.insert(items, it) end
+                table.insert(items, { isHeader = true, title = "INVENTORY" })
+                for _, it in ipairs(bagItems) do table.insert(items, it) end
+            elseif #equippedItems > 0 then
+                table.insert(items, { isHeader = true, title = "EQUIPPED" })
+                for _, it in ipairs(equippedItems) do table.insert(items, it) end
+            elseif #bagItems > 0 then
+                table.insert(items, { isHeader = true, title = "INVENTORY" })
+                for _, it in ipairs(bagItems) do table.insert(items, it) end
             end
 
             local count = #items
@@ -2849,18 +2917,13 @@ NS.CB_GetProfessionsFrame = function(key, botName)
             end
 
             emptyText:Hide()
-            local visibleRows = math.min(count, 8)
-            local totalH = 26 + (visibleRows * ROW_H) + 12
-            picker:SetHeight(totalH)
-            scrollFrame:SetHeight(visibleRows * ROW_H)
-            content:SetHeight(count * ROW_H)
+            local yOffset = 0
 
             for i = 1, count do
                 local itemData = items[i]
                 local row = rows[i]
                 if not row then
                     row = CreateFrame("Button", nil, content)
-                    row:SetHeight(ROW_H)
                     row:SetPoint("LEFT", content, "LEFT", 2, 0)
                     row:SetPoint("RIGHT", content, "RIGHT", -2, 0)
 
@@ -2885,8 +2948,10 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                     hov:SetBlendMode("ADD")
                     hov:SetAllPoints()
                     hov:SetAlpha(0.4)
+                    row.hov = hov
 
                     row:SetScript("OnEnter", function(rSelf)
+                        if rSelf.isHeader then return end
                         if rSelf.itemLink and GameTooltip then
                             GameTooltip:SetOwner(rSelf, "ANCHOR_RIGHT")
                             GameTooltip:SetHyperlink(rSelf.itemLink)
@@ -2898,7 +2963,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                     end)
 
                     row:SetScript("OnClick", function(rSelf)
-                        if not rSelf.slotId or not picker.recipe then return end
+                        if rSelf.isHeader or not picker.recipe then return end
                         local r = picker.recipe
                         local bKey = f.botKey
                         local bEntry = CleanBot_PartyBots and CleanBot_PartyBots[bKey]
@@ -2906,15 +2971,21 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                         local bUnit = (NS.CB_FindPartyUnit and NS.CB_FindPartyUnit(bName)) or (bEntry and bEntry.unit)
                         if not bUnit then return end
 
-                        -- Re-lectura atómica al clic (Agregado 1 para evitar TARGET_STALE)
-                        local freshLink = GetInventoryItemLink(bUnit, rSelf.slotId)
-                        local freshItemId = freshLink and tonumber(freshLink:match("item:(%d+)"))
-                        if not freshItemId or freshItemId <= 0 then
-                            picker:RefreshItems()
-                            if NS.CB_Print then
-                                NS.CB_Print(string.format("%s: Selected item is no longer equipped.", bName))
+                        local targetItemId = rSelf.itemId
+                        local targetBag = rSelf.targetBag
+                        local targetSlot = rSelf.targetSlot
+
+                        if rSelf.isEquipped then
+                            local freshLink = GetInventoryItemLink(bUnit, rSelf.slotId)
+                            local freshItemId = freshLink and tonumber(freshLink:match("item:(%d+)"))
+                            if not freshItemId or freshItemId <= 0 then
+                                picker:RefreshItems()
+                                if NS.CB_Print then
+                                    NS.CB_Print(string.format("%s: Selected item is no longer equipped.", bName))
+                                end
+                                return
                             end
-                            return
+                            targetItemId = freshItemId
                         end
 
                         picker:Hide()
@@ -2935,9 +3006,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                         end
                         local waitSec = castDuration + 0.5
 
-                        local targetBag = 255
-                        local targetSlot = rSelf.slotId - 1
-                        local sent = NS.CB_BridgeCraftRecipeTarget and NS.CB_BridgeCraftRecipeTarget(bKey, bName, skillId, r.spellId, targetBag, targetSlot, freshItemId, function(success, reason)
+                        local sent = NS.CB_BridgeCraftRecipeTarget and NS.CB_BridgeCraftRecipeTarget(bKey, bName, skillId, r.spellId, targetBag, targetSlot, targetItemId, function(success, reason)
                             if not success then
                                 StopCraftWatcher()
                                 f.isCrafting = false
@@ -2959,27 +3028,69 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                     rows[i] = row
                 end
 
-                row:SetPoint("TOP", content, "TOP", 0, -(i - 1) * ROW_H)
-                row.slotId = itemData.slotId
-                row.itemLink = itemData.link
-                row.icon:SetTexture(itemData.texture)
-                row.nameLabel:SetText(itemData.name)
-                local rQual, gQual, bQual = GetItemQualityColor(itemData.quality)
-                if rQual then row.nameLabel:SetTextColor(rQual, gQual, bQual) else row.nameLabel:SetTextColor(1, 1, 1) end
-                row.slotLabel:SetText(itemData.slotName)
+                local rowH = itemData.isHeader and 20 or 26
+                row:SetHeight(rowH)
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", content, "TOPLEFT", 2, -yOffset)
+                row:SetPoint("RIGHT", content, "RIGHT", -2, 0)
+                yOffset = yOffset + rowH
+
+                row.isHeader   = itemData.isHeader
+                row.isEquipped = itemData.isEquipped
+                row.slotId     = itemData.slotId
+                row.targetBag  = itemData.targetBag
+                row.targetSlot = itemData.targetSlot
+                row.itemId     = itemData.itemId
+                row.itemLink   = itemData.link
+
+                if itemData.isHeader then
+                    row.icon:Hide()
+                    row.slotLabel:Hide()
+                    row.nameLabel:ClearAllPoints()
+                    row.nameLabel:SetPoint("LEFT", row, "LEFT", 4, 0)
+                    row.nameLabel:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+                    row.nameLabel:SetText("|cffffd200-- " .. itemData.title .. " --|r")
+                    row:EnableMouse(false)
+                else
+                    row.icon:Show()
+                    row.icon:SetTexture(itemData.texture)
+                    row.slotLabel:Show()
+                    row.slotLabel:SetText(itemData.slotName)
+                    row.nameLabel:ClearAllPoints()
+                    row.nameLabel:SetPoint("LEFT", row.icon, "RIGHT", 4, 0)
+                    row.nameLabel:SetPoint("RIGHT", row.slotLabel, "LEFT", -4, 0)
+                    row.nameLabel:SetText(itemData.name)
+                    local rQual, gQual, bQual = GetItemQualityColor(itemData.quality)
+                    if rQual then
+                        row.nameLabel:SetTextColor(rQual, gQual, bQual)
+                    else
+                        row.nameLabel:SetTextColor(1, 1, 1)
+                    end
+                    row:EnableMouse(true)
+                end
                 row:Show()
             end
 
             for i = count + 1, #rows do
                 rows[i]:Hide()
             end
+
+            content:SetHeight(math.max(1, yOffset))
+            local visibleH = math.min(math.max(48, yOffset), 220)
+            picker:SetHeight(38 + visibleH)
+            scrollFrame:SetHeight(visibleH)
         end
 
-        -- Refresco reactivo en INSPECT_TALENT_READY (Agregado 2)
         picker:RegisterEvent("INSPECT_TALENT_READY")
-        picker:SetScript("OnEvent", function(pSelf, pEvent)
-            if pEvent == "INSPECT_TALENT_READY" and pSelf:IsShown() then
+        picker:RegisterEvent("CHAT_MSG_ADDON")
+        picker:SetScript("OnEvent", function(pSelf, pEvent, pPrefix, pMsg)
+            if not pSelf:IsShown() then return end
+            if pEvent == "INSPECT_TALENT_READY" then
                 pSelf:RefreshItems()
+            elseif pEvent == "CHAT_MSG_ADDON" and pPrefix == "MBOT" and pMsg then
+                if strsub(pMsg, 1, 14) == "INV_EXACT_END~" or strsub(pMsg, 1, 8) == "INV_END~" then
+                    pSelf:RefreshItems()
+                end
             end
         end)
 
@@ -2991,6 +3102,9 @@ NS.CB_GetProfessionsFrame = function(key, botName)
             local unit = (NS.CB_FindPartyUnit and NS.CB_FindPartyUnit(effectiveBotName)) or (entry and entry.unit)
             if unit and NotifyInspect and (CheckInteractDistance == nil or CheckInteractDistance(unit, 1)) then
                 NotifyInspect(unit)
+            end
+            if botKey and effectiveBotName and NS.CB_FetchInventory then
+                NS.CB_FetchInventory(botKey, effectiveBotName)
             end
             pSelf:RefreshItems()
             scrollFrame:SetVerticalScroll(0)

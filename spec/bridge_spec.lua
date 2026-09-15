@@ -1245,4 +1245,49 @@ describe("Bridge craft recipe target (RUN~CRAFT_RECIPE_TARGET and CRAFT_RECIPE_T
         assert.is_false(cbSuccess)
         assert.equals("TIMEOUT", cbReason)
     end)
+
+    it("sends RUN~CRAFT_RECIPE_TARGET with bag 0 (backpack) for item or vellum target", function()
+        local ok = NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 0, 3, 37602)
+        assert.is_true(ok)
+        assert.equals(1, #Mock.addon)
+        assert.equals("MBOT", Mock.addon[1].prefix)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~0~3~37602$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.craftTargetPending[token])
+        assert.equals(333, NS.craftTargetPending[token].skillId)
+        assert.equals(27960, NS.craftTargetPending[token].spellId)
+        assert.equals(0, NS.craftTargetPending[token].targetBag)
+        assert.equals(3, NS.craftTargetPending[token].targetSlot)
+        assert.equals(37602, NS.craftTargetPending[token].targetItemId)
+    end)
+
+    it("sends RUN~CRAFT_RECIPE_TARGET with bag 1-4 for inventory bag item", function()
+        local ok = NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 2, 5, 43145)
+        assert.is_true(ok)
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~2~5~43145$")
+        assert.is_not_nil(token)
+        assert.equals(2, NS.craftTargetPending[token].targetBag)
+        assert.equals(5, NS.craftTargetPending[token].targetSlot)
+        assert.equals(43145, NS.craftTargetPending[token].targetItemId)
+    end)
+
+    it("handles CRAFT_RECIPE_TARGET_RESULT OK for bag items", function()
+        local cbCalled, cbSuccess, cbReason, cbItem = false, nil, nil, nil
+        NS.CB_BridgeCraftRecipeTarget("artemis", "Artemis", 333, 27960, 1, 4, 37603, function(success, reason, targetItemId)
+            cbCalled = true
+            cbSuccess = success
+            cbReason = reason
+            cbItem = targetItemId
+        end)
+
+        local token = Mock.addon[1].text:match("^RUN~CRAFT_RECIPE_TARGET~([^~]+)~Artemis~333~27960~1~4~37603$")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "CRAFT_RECIPE_TARGET_RESULT~" .. token .. "~Artemis~OK~OK~333~27960~1~4~37603")
+
+        assert.is_true(cbCalled)
+        assert.is_true(cbSuccess)
+        assert.equals("OK", cbReason)
+        assert.equals(37603, cbItem)
+        assert.is_nil(NS.craftTargetPending[token])
+    end)
 end)
