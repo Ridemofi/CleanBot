@@ -39,12 +39,21 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 <img width="700" alt="image" src="https://github.com/user-attachments/assets/083d79cc-d36a-443e-bc55-7d21d037e57f" />
 
 ## Spellbook *(Requires Multibot Bridge)*
-- Modern Dragonflight-style 3-column card layout
-- Search and filter spells in real time
-- Order bots to cast spells directly on themselves (Left-Click) or on you (Right-Click)
-- Multi-bot tabs to easily switch between party members
+- Displays bot spells categorized by General and Class tabs
+- Spell search and filtering
+- Direct spell casting on the bot (Left-Click) or the player (Right-Click)
+- Navigation tabs to switch between party members
 
 <img width="700" alt="image" src="https://github.com/user-attachments/assets/54703df0-290b-460a-a5f6-f88cbe23638b" />
+
+## Professions *(Requires Multibot Bridge)*
+- View bot professions, skill ranks, and learned recipes
+- Search and filter recipes by learned status, skill gain, and available materials
+- Order bots to craft items with cast monitoring and inventory reagent refresh
+- Target picker for enchantments: apply to equipped gear, bag items (bags 0–4), or Enchanting Vellums
+- Dropdown selector to switch between multiple professions learned by the bot
+
+<img width="700" alt="image" src="https://github.com/user-attachments/assets/58ac0002-8021-437e-90ad-86502ee1ae3f" />
 
 # Group Tab
 - Multiselect groups and bots using the standard windows shortcuts
@@ -81,3 +90,5 @@ A clean interface to manage Playerbots on WotLK 3.3.5a Servers. No more complex 
 # Credits
 
 - **BennyBroseph (Jake James)**, author of the original CleanBot.
+- **[DragonUI New Era](https://github.com/ghbset/DragonUI_NewEra)** — downported retail UI textures this builds on.
+- All World of Warcraft UI art © Blizzard Entertainment.
