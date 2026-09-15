@@ -151,8 +151,8 @@ describe("CB_StartDisenchantWatcher", function()
         NS.CB_StartDisenchantWatcher("bot1", "Bot1")
         Mock.fireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "Disenchant", "", 1, 13262)
         assert.equals(0, #fetched)
-        assert.is_nil(CleanBot_PartyBots.bot1.isDisenchanting)
-        assert.equals("Refreshing...", loadingStates[#loadingStates].text)
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+        assert.equals("Disenchanting...", loadingStates[#loadingStates].text)
         Mock.tick(0.6)
         assert.equals(1, #fetched)
         assert.equals("bot1", fetched[1].key)
@@ -174,6 +174,46 @@ describe("CB_StartDisenchantWatcher", function()
         assert.is_nil(CleanBot_PartyBots.bot1.isDisenchanting)
         assert.is_false(loadingStates[#loadingStates].on)
         assert.equals(0, #fetched)
+    end)
+
+    it("cancels immediately and hides overlay on CHAT_MSG_WHISPER Cannot cast error from target bot", function()
+        NS.CB_StartDisenchantWatcher("bot1", "Bot1")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+        -- Send whisper error from Bot1
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Cannot cast [Disenchant] on [Trickster's Leggings].", "Bot1")
+        assert.is_nil(CleanBot_PartyBots.bot1.isDisenchanting)
+        assert.is_false(loadingStates[#loadingStates].on)
+        assert.equals(0, #fetched)
+    end)
+
+    it("cancels immediately and hides overlay on CHAT_MSG_SYSTEM error from target bot", function()
+        NS.CB_StartDisenchantWatcher("bot1", "Bot1")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+        -- System message formatted exactly like mod-playerbots PlayerbotMgr::CheckTellErrors
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "Bot1|cfff00000: Cannot cast |cff71d5ff|Hspell:13262|h[Disenchant]|h|r on [Trickster's Leggings]")
+        assert.is_nil(CleanBot_PartyBots.bot1.isDisenchanting)
+        assert.is_false(loadingStates[#loadingStates].on)
+        assert.equals(0, #fetched)
+    end)
+
+    it("ignores CHAT_MSG_SYSTEM from other bots or unrelated system messages", function()
+        NS.CB_StartDisenchantWatcher("bot1", "Bot1")
+        -- Another bot's error
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "OtherBot|cfff00000: Cannot cast [Disenchant] on [Item]")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+        -- Unrelated system message
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "You have joined a group.")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+    end)
+
+    it("ignores CHAT_MSG_WHISPER from other bots or unrelated whispers", function()
+        NS.CB_StartDisenchantWatcher("bot1", "Bot1")
+        -- Whisper from another bot
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Cannot cast [Disenchant] on [Item].", "OtherBot")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
+        -- Unrelated whisper from Bot1
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Hello there!", "Bot1")
+        assert.is_true(CleanBot_PartyBots.bot1.isDisenchanting)
     end)
 
     it("triggers fallback fetch at 4.5s if no unit event is received", function()

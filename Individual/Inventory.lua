@@ -243,11 +243,54 @@ local function CB_StartDisenchantWatcher(key, botName, cell)
     disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
     disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
     disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_FAILED")
+    disenchantWatcher:RegisterEvent("CHAT_MSG_WHISPER")
+    disenchantWatcher:RegisterEvent("CHAT_MSG_SYSTEM")
 
     local expectedSpellName = GetSpellInfo and GetSpellInfo(13262)
 
-    disenchantWatcher:SetScript("OnEvent", function(self, event, unit, spellName, rank, lineId, spellId)
+    disenchantWatcher:SetScript("OnEvent", function(self, event, a1, a2, a3, a4, a5)
         if not self.token or self.token ~= token then return end
+
+        if event == "CHAT_MSG_SYSTEM" or event == "CHAT_MSG_WHISPER" then
+            local rawMsg = a1
+            if not rawMsg or not self.botName then return end
+
+            if event == "CHAT_MSG_WHISPER" then
+                local sender = a2
+                if not sender then return end
+                local senderName = sender:match("^([^-]+)") or sender
+                if senderName:lower() ~= self.botName:lower() then return end
+            end
+
+            local cleanMsg = rawMsg:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+
+            if event == "CHAT_MSG_SYSTEM" then
+                if not cleanMsg:lower():find(self.botName:lower(), 1, true) then
+                    return
+                end
+            end
+
+            local spellMatch = false
+            if cleanMsg:find("Disenchant", 1, true)
+                or (expectedSpellName and cleanMsg:find(expectedSpellName, 1, true))
+                or cleanMsg:find("13262", 1, true) then
+                spellMatch = true
+            end
+
+            if spellMatch and (cleanMsg:find("Cannot cast", 1, true)
+                or cleanMsg:find("is failed", 1, true)
+                or cleanMsg:find("cannot cast", 1, true)
+                or cleanMsg:find("failed", 1, true)) then
+                CB_StopDisenchantWatcher()
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(f, false)
+                end
+            end
+            return
+        end
+
+        local unit, spellName, rank, lineId, spellId = a1, a2, a3, a4, a5
         if self.targetUnit then
             if unit ~= self.targetUnit then return end
         elseif UnitName and self.botName then
@@ -263,12 +306,10 @@ local function CB_StartDisenchantWatcher(key, botName, cell)
         if not matches then return end
 
         if event == "UNIT_SPELLCAST_SUCCEEDED" then
-            CB_StopDisenchantWatcher()
-            local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
-            if f and NS.CB_SetInventoryLoading then
-                NS.CB_SetInventoryLoading(f, true, "Refreshing...")
-            end
-            -- Delay 0.5s for bot to auto-loot the disenchanted dust/essence into bags
+            disenchantWatcher:UnregisterAllEvents()
+            -- Delay 0.5s for bot to auto-loot the disenchanted dust/essence into bags,
+            -- keeping entry.isDisenchanting = true so the overlay displays "Disenchanting..."
+            -- until the inventory reconcile completes.
             NS.CB_After(0.5, function()
                 if NS.CB_FetchInventory then
                     NS.CB_FetchInventory(key, botName, true)
@@ -1080,6 +1121,7 @@ local function CB_GetGridFrame(kind, key, botName)
     local frameW = padL + padR + COLS * CELL_SIZE + (COLS - 1) * CELL_PAD
     local f = CreateFrame("Frame", cfg.framePrefix .. key, UIParent)
     f.kind = kind
+    f.key  = key
     NS.CB_RegisterRootFrame(f)
     f:SetWidth(frameW)
     f:SetHeight(NS.FRAME_HEIGHT)
@@ -1494,7 +1536,22 @@ NS.CB_SetInventoryLoading = function(f, on, customText)
     if not f then return end
     if on then
         local ov = CB_EnsureLoadingOverlay(f)
-        ov.text:SetText(customText or (f.rendered and "Refreshing..." or "Loading..."))
+        local text = customText
+        if not text then
+            local key = f.key
+            if not key and NS.botInventoryFrames then
+                for k, frame in pairs(NS.botInventoryFrames) do
+                    if frame == f then key = k; break end
+                end
+            end
+            local entry = key and CleanBot_PartyBots and CleanBot_PartyBots[key]
+            if entry and entry.isDisenchanting then
+                text = "Disenchanting..."
+            else
+                text = f.rendered and "Refreshing..." or "Loading..."
+            end
+        end
+        ov.text:SetText(text)
         ov:Show()
     elseif f.loadingOverlay then
         f.loadingOverlay:Hide()
@@ -1510,6 +1567,11 @@ local function CB_RenderGrid(kind, key, forceFull)
     local cfg   = KINDS[kind]
     local entry = CleanBot_PartyBots[key]
     if not entry then return end
+
+    if kind == "inventory" and not entry[cfg.awaitField] and entry.isDisenchanting then
+        entry.isDisenchanting = nil
+        CB_StopDisenchantWatcher()
+    end
 
     -- Reflect (don't clear) the in-flight flag: the overlay shows while a fetch
     -- is pending and hides once it lands. This is deliberately not a clear point,
