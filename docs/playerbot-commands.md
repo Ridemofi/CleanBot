@@ -70,6 +70,7 @@ action name in `ChatActionContext.h`.**
 | `b <link>` | `b` | `TriggerNode("b")` → buy (`BuyAction`) | ✅ (vendor extension — a selected bot buys the right-clicked merchant item) |
 | `s <link>` | `s` | `TriggerNode("s")` → sell (`SellAction`) | ✅ (vendor extension + inventory "Sell" menu) |
 | `guild bank <link>` | `guild bank` | `GuildBankAction` (deposit only) | ✅ (inventory "Deposit to Guild Bank" menu — deposit-only, no list/withdraw) |
+| `cast 13262 <link>` | `cast` | `CastCustomSpellAction` (`cast <spell> [target]`) | ✅ (inventory "Disenchant" menu — triggers spell 13262 Disenchant on target item link) |
 
 ---
 
@@ -271,10 +272,12 @@ the current spec. The filter's first token is run through `parseSkill`, so it do
 `remove glyph` (`RemoveGlyphAction`). Glyph-slot management (using inscription products), not
 Inscription leveling.
 
-**Not available:** there are no `disenchant` / `prospect` / `mill` / `smelt` / "enchant my item"
-commands. The only profession-adjacent automation is **disenchanting via the loot strategy**
-(`ll disenchant` / `ll skill` modes — see the `ll` row above), which CleanBot already exposes as
-the Loot Quality dropdown.
+**Item interaction:** While there is no standalone `disenchant` word trigger, disenchanting an
+item on demand is handled via **`cast 13262 <link>`** (dispatched by CleanBot's inventory context
+menu for enchanters). General automation also exists via the **loot strategy** (`ll disenchant` /
+`ll skill` modes — see the `ll` row above), exposed in CleanBot's Loot Quality dropdown.
+Other batch profession actions (`prospect` / `mill` / `smelt` / "enchant my item") do not have
+direct named triggers.
 
 ### go — move to a unit / object / coordinates (`GoAction.cpp`)
 Trigger `go` — confirmed in the `supported` vector (trigger == action; action name is `"Go"`).

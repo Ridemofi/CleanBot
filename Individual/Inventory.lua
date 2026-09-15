@@ -55,7 +55,7 @@ local KINDS = {
 ---@return boolean      Whether the grid's list fetch is in flight.
 local function CB_GridLocked(kind, key)
     local entry = CleanBot_PartyBots[key]
-    return entry ~= nil and entry[KINDS[kind].awaitField] == true
+    return entry ~= nil and (entry[KINDS[kind].awaitField] == true or (kind == "inventory" and entry.isDisenchanting == true))
 end
 
 -- These replace NS.PADDING.frame.* entirely on the Blizz path — the art has
@@ -138,6 +138,170 @@ local function CB_EquipItem(key, botName, link, cell)
     end
 end
 
+local DISENCHANTABLE_EQUIP_LOCS = {
+    INVTYPE_HEAD           = true,
+    INVTYPE_NECK           = true,
+    INVTYPE_SHOULDER       = true,
+    INVTYPE_CLOAK          = true,
+    INVTYPE_CHEST          = true,
+    INVTYPE_ROBE           = true,
+    INVTYPE_WRIST          = true,
+    INVTYPE_HAND           = true,
+    INVTYPE_WAIST          = true,
+    INVTYPE_LEGS           = true,
+    INVTYPE_FEET           = true,
+    INVTYPE_FINGER         = true,
+    INVTYPE_SHIELD         = true,
+    INVTYPE_HOLDABLE       = true,
+    INVTYPE_WEAPON         = true,
+    INVTYPE_2HWEAPON       = true,
+    INVTYPE_WEAPONMAINHAND = true,
+    INVTYPE_WEAPONOFFHAND  = true,
+    INVTYPE_RANGED         = true,
+    INVTYPE_RANGEDRIGHT    = true,
+    INVTYPE_THROWN         = true,
+}
+
+---@param entry table? Bot entry in CleanBot_PartyBots
+---@return boolean
+local function BotHasEnchanting(entry)
+    if not entry then return false end
+    if entry.spellbookSeen and entry.spellbookSeen[13262] then return true end
+    if entry.professions then
+        for _, p in ipairs(entry.professions) do
+            if p.skillId == 333 or p.key == "enchanting" then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+--- Checks whether an item in a bot's bags can be disenchanted by that bot.
+--- Requires the bot to have Enchanting, and the item to be uncommon+ (quality >= 2),
+--- non-quest, and an eligible equipment slot (excluding trinkets, relics, shirts, tabards, bags).
+---@param botKey string Bot lookup key.
+---@param itemLink string Item hyperlink or item identifier.
+---@return boolean
+NS.CB_IsItemDisenchantable = function(botKey, itemLink)
+    if not botKey or not itemLink then return false end
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[botKey]
+    if not BotHasEnchanting(entry) then return false end
+
+    local _, _, quality, _, _, itemType, _, _, equipLoc = GetItemInfo(itemLink)
+    if not quality or quality < 2 then return false end
+    if itemType == NS.CB_ItemTypeToken("quest") then return false end
+    if not equipLoc or not DISENCHANTABLE_EQUIP_LOCS[equipLoc] then return false end
+
+    return true
+end
+
+-- Watcher for Disenchant cast completion on a bot.
+local disenchantWatcher = nil
+local currentWatcherToken = 0
+
+local function CB_StopDisenchantWatcher()
+    if disenchantWatcher then
+        disenchantWatcher:UnregisterAllEvents()
+        local prevKey = disenchantWatcher.key
+        if prevKey then
+            local e = CleanBot_PartyBots[prevKey]
+            if e then e.isDisenchanting = nil end
+        end
+        disenchantWatcher.targetUnit = nil
+        disenchantWatcher.key = nil
+        disenchantWatcher.botName = nil
+        disenchantWatcher.cell = nil
+        disenchantWatcher.token = nil
+    end
+end
+
+local function CB_StartDisenchantWatcher(key, botName, cell)
+    if not disenchantWatcher then
+        disenchantWatcher = CreateFrame("Frame")
+    end
+    CB_StopDisenchantWatcher()
+
+    currentWatcherToken = currentWatcherToken + 1
+    local token = currentWatcherToken
+    disenchantWatcher.token = token
+    disenchantWatcher.key = key
+    disenchantWatcher.botName = botName
+    disenchantWatcher.cell = cell
+    disenchantWatcher.targetUnit = NS.CB_FindPartyUnit and NS.CB_FindPartyUnit(botName)
+
+    local entry = CleanBot_PartyBots[key]
+    if entry then
+        entry.isDisenchanting = true
+    end
+
+    local invFrame = NS.botInventoryFrames and NS.botInventoryFrames[key]
+    if invFrame and NS.CB_SetInventoryLoading then
+        NS.CB_SetInventoryLoading(invFrame, true, "Disenchanting...")
+    end
+
+    disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
+    disenchantWatcher:RegisterEvent("UNIT_SPELLCAST_FAILED")
+
+    local expectedSpellName = GetSpellInfo and GetSpellInfo(13262)
+
+    disenchantWatcher:SetScript("OnEvent", function(self, event, unit, spellName, rank, lineId, spellId)
+        if not self.token or self.token ~= token then return end
+        if self.targetUnit then
+            if unit ~= self.targetUnit then return end
+        elseif UnitName and self.botName then
+            if UnitName(unit) ~= self.botName then return end
+        end
+
+        local matches = false
+        if spellId and tonumber(spellId) == 13262 then
+            matches = true
+        elseif expectedSpellName and spellName and spellName == expectedSpellName then
+            matches = true
+        end
+        if not matches then return end
+
+        if event == "UNIT_SPELLCAST_SUCCEEDED" then
+            CB_StopDisenchantWatcher()
+            local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+            if f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, true, "Refreshing...")
+            end
+            -- Delay 0.5s for bot to auto-loot the disenchanted dust/essence into bags
+            NS.CB_After(0.5, function()
+                if NS.CB_FetchInventory then
+                    NS.CB_FetchInventory(key, botName, true)
+                end
+            end)
+        elseif event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
+            CB_StopDisenchantWatcher()
+            local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+            if f and NS.CB_SetInventoryLoading then
+                NS.CB_SetInventoryLoading(f, false)
+            end
+        end
+    end)
+
+    -- Fallback timer at 4.5s in case bot is >100 yds away or unit events don't fire
+    NS.CB_After(4.5, function()
+        if disenchantWatcher and disenchantWatcher.token == token then
+            CB_StopDisenchantWatcher()
+            if NS.CB_FetchInventory then
+                NS.CB_FetchInventory(key, botName, true)
+            else
+                local f = NS.botInventoryFrames and NS.botInventoryFrames[key]
+                if f and NS.CB_SetInventoryLoading then
+                    NS.CB_SetInventoryLoading(f, false)
+                end
+            end
+        end
+    end)
+end
+
+NS.CB_StartDisenchantWatcher = CB_StartDisenchantWatcher
+NS.CB_StopDisenchantWatcher  = CB_StopDisenchantWatcher
+
 -- ── Inventory cell right-click context menu ──────────────────────────────
 local invMenu = CreateFrame("Frame", "CleanBotInvMenu", UIParent, "UIDropDownMenuTemplate")
 
@@ -217,6 +381,17 @@ local function CB_ShowInvMenu(cell, key)
             end
             addItemCmd("Trade", "t", false)
             addItemCmd("Sell",  "s", true)
+
+            if NS.CB_IsItemDisenchantable and NS.CB_IsItemDisenchantable(key, cell.itemLink) then
+                info.text = "Disenchant"
+                info.func = function()
+                    local entry = CleanBot_PartyBots[key]
+                    if not entry then return end
+                    NS.CB_SendBotCommand(entry.name, "cast 13262 " .. NS.CB_CleanItemLink(cell.itemLink))
+                    CB_StartDisenchantWatcher(key, entry.name, cell)
+                end
+                UIDropDownMenu_AddButton(info)
+            end
 
             -- Deposit to the guild bank (bags → guild-bank tab 0). Deposit-only: the server
             -- can't list or withdraw a bot's guild bank, and the guild bank is shared guild-wide.
@@ -1195,6 +1370,9 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
                 cell.slot = item.slot
                 cell.itemId = item.itemId or tonumber(id)
                 cell.count = item.count
+                cell.isPendingDisenchant = nil
+                if cell.icon and cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+                if cell.icon and cell.icon.SetAlpha then cell.icon:SetAlpha(1.0) end
                 if item.count > 1 then
                     cell.countText:SetText(item.count)
                     cell.countText:Show()
@@ -1209,6 +1387,9 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
                 cell.itemId = nil
                 cell.count = nil
                 cell.countText:Hide()
+                cell.isPendingDisenchant = nil
+                if cell.icon and cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+                if cell.icon and cell.icon.SetAlpha then cell.icon:SetAlpha(1.0) end
                 NS.CB_ClearQualityBorder(cell)
                 NS.CB_SetRarityOverlay(cell, nil)
             end
@@ -1241,6 +1422,9 @@ local function CB_PatchInventory(f, rawItems, bagTotal, bagUsed, entry)
             cell.slot = item.slot
             cell.itemId = item.itemId or tonumber(strmatch(item.link, "item:(%d+)"))
             cell.count = item.count
+            cell.isPendingDisenchant = nil
+            if cell.icon and cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+            if cell.icon and cell.icon.SetAlpha then cell.icon:SetAlpha(1.0) end
             NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
@@ -1302,13 +1486,15 @@ end
 
 -- Show/hide the loading overlay. Text is "Refreshing..." when the grid already
 -- holds rendered data (a re-fetch over existing items), else "Loading...".
----@param f  table    An inventory frame from NS.botInventoryFrames.
----@param on boolean  Whether a fetch is in flight.
-NS.CB_SetInventoryLoading = function(f, on)
+-- An optional customText overrides the label (e.g. "Disenchanting...").
+---@param f          table    An inventory frame from NS.botInventoryFrames.
+---@param on         boolean  Whether a fetch is in flight.
+---@param customText string?  Optional override text for the overlay label.
+NS.CB_SetInventoryLoading = function(f, on, customText)
     if not f then return end
     if on then
         local ov = CB_EnsureLoadingOverlay(f)
-        ov.text:SetText(f.rendered and "Refreshing..." or "Loading...")
+        ov.text:SetText(customText or (f.rendered and "Refreshing..." or "Loading..."))
         ov:Show()
     elseif f.loadingOverlay then
         f.loadingOverlay:Hide()
@@ -1435,6 +1621,7 @@ local function CB_RenderGrid(kind, key, forceFull)
             cell:RegisterForClicks("LeftButtonUp", "RightButtonUp")
             -- No CB_ApplyQualityBackdrop — normTex vertex color is used instead.
             cell:SetScript("OnClick", function(self, btn)
+                if self.isPendingDisenchant then return end
                 if btn == "RightButton" then
                     if not self.itemLink then return end
                     -- With the bank open we mirror the default WoW bank: plain right-click
@@ -1473,6 +1660,7 @@ local function CB_RenderGrid(kind, key, forceFull)
             end)
 
             cell:SetScript("OnMouseDown", function(self, btn)
+                if self.isPendingDisenchant then return end
                 if btn ~= "LeftButton" or not self.itemLink or IsShiftKeyDown() then return end
                 if CB_GridLocked(kind, key) then return end  -- mid whisper refresh
                 local itemId   = strmatch(self.itemLink, "item:(%d+)")
@@ -1491,6 +1679,9 @@ local function CB_RenderGrid(kind, key, forceFull)
             NS.CB_AttachTooltip(cell, function(tt, self)
                 if not self.itemLink then return false end
                 tt:SetHyperlink(self.itemLink)
+                if self.isPendingDisenchant then
+                    tt:AddLine("Disenchanting...", 1, 0.82, 0)
+                end
             end)
 
             f.cells[i] = cell
@@ -1515,6 +1706,9 @@ local function CB_RenderGrid(kind, key, forceFull)
             cell.slot = item.slot
             cell.itemId = item.itemId or tonumber(strmatch(item.link, "item:(%d+)"))
             cell.count = item.count
+            cell.isPendingDisenchant = nil
+            if cell.icon and cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+            if cell.icon and cell.icon.SetAlpha then cell.icon:SetAlpha(1.0) end
             NS.CB_ApplyItemVisuals(cell, item.link)
             if item.count > 1 then
                 cell.countText:SetText(item.count)
@@ -1530,6 +1724,9 @@ local function CB_RenderGrid(kind, key, forceFull)
             cell.slot = nil
             cell.itemId = nil
             cell.count = nil
+            cell.isPendingDisenchant = nil
+            if cell.icon and cell.icon.SetDesaturated then cell.icon:SetDesaturated(false) end
+            if cell.icon and cell.icon.SetAlpha then cell.icon:SetAlpha(1.0) end
             NS.CB_ApplyItemVisuals(cell, nil)
         end
 
@@ -1559,7 +1756,13 @@ local function CB_RenderGrid(kind, key, forceFull)
     end
 end
 
-NS.CB_RenderInventory = function(key, forceFull) CB_RenderGrid("inventory", key, forceFull) end
+NS.CB_RenderInventory = function(key, forceFull)
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    if entry and not entry.professions and not entry.awaitingProfessions and NS.CB_FetchProfessions then
+        NS.CB_FetchProfessions(key, entry.name)
+    end
+    CB_RenderGrid("inventory", key, forceFull)
+end
 NS.CB_RenderBank      = function(key, forceFull) CB_RenderGrid("bank",      key, forceFull) end
 
 -- ── Open the inventory frame (always shows, never toggles) ───────────────

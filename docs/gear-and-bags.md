@@ -21,6 +21,9 @@ window shows everything the bot carries plus its money. From here you can:
 - **Use** an item (food, potions, quest items…).
 - **Equip** gear straight from the bags.
 - **Sell Trash** — vendor all the bot's gray items in one click (a vendor must be nearby).
+- **Disenchant** — right-click eligible uncommon+ gear on an enchanter bot to disenchant it.
+  The window locks with a `"Disenchanting..."` overlay until the cast finishes and materials
+  arrive. Trinkets, relics, shirts, tabards, and bags are excluded.
 - **Deposit to Guild Bank** — right-click an item and choose this to drop it into your guild's
   vault. The bot has to be **in your guild**, standing at a **guild vault**, with **deposit
   rights**; otherwise CleanBot tells you so. This is deposit-only — the server can't show a bot's

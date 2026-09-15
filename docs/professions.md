@@ -33,8 +33,10 @@ recipes, filter recipes, and order bots to craft items or apply target enchantme
   CleanBot monitors the bot's casting state (`UNIT_SPELLCAST_SUCCEEDED`, `FAILED`,
   `INTERRUPTED`) and automatically refreshes reagent counts and skill progress upon completion.
 - **Target Enchantments:** For recipes that apply directly to equipment (e.g. Enchanting),
-  clicking **Select Item** opens a picker displaying the bot's equipped gear slots.
-  Selecting a target slot dispatches `RUN~CRAFT_RECIPE_TARGET`.
+  clicking **Select Item** opens a picker displaying eligible targets organized into sections:
+  the bot's equipped gear slots, armor and weapons located in its inventory bags (bags 0–4),
+  and Enchanting Vellums. Non-enchantable slots (shirts, trinkets, relics, necks) are excluded.
+  Selecting a target dispatches `RUN~CRAFT_RECIPE_TARGET`.
 
 ## Settings
 
