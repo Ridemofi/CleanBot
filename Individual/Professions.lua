@@ -977,17 +977,18 @@ local function BotHasTool(f, toolName, recipe)
         end
     end
 
-    if entry and entry.inventory then
-        local invItems = entry.inventory.items or entry.inventory
-        for _, it in pairs(invItems) do
-            local itName = it.name
-            if not itName and it.itemId and GetItemInfo then
-                itName = GetItemInfo(it.itemId)
-            end
-            if itName then
-                local normItem = itName:lower():gsub("[%c%p%s]", "")
-                if normItem == normTool or normItem:find(normTool, 1, true) then
-                    return true
+    if entry and entry.inventory and type(entry.inventory.items) == "table" then
+        for _, it in pairs(entry.inventory.items) do
+            if type(it) == "table" then
+                local itName = it.name
+                if not itName and it.itemId and GetItemInfo then
+                    itName = GetItemInfo(it.itemId)
+                end
+                if itName then
+                    local normItem = itName:lower():gsub("[%c%p%s]", "")
+                    if normItem == normTool or normItem:find(normTool, 1, true) then
+                        return true
+                    end
                 end
             end
         end
@@ -995,6 +996,7 @@ local function BotHasTool(f, toolName, recipe)
 
     return false
 end
+NS.CB_BotHasTool = BotHasTool
 
 local function ShowRecipeTooltip(owner, recipe, optFrame)
     if not owner or not recipe then return end
@@ -1410,6 +1412,8 @@ function RefreshRecipeList(f)
                 row.collapseIcon:Hide()
 
                 row.rname:SetText(item.r.name)
+                -- Note: item.r.difficulty reflects the value received from mod-multibot-bridge
+                -- (MultiBotBridge.cpp: GetRecipeDifficulty).
                 local dc = DIFF_COLORS[item.r.difficulty] or DIFF_COLORS.trivial
                 if f.opts and f.opts.colorByDifficulty then
                     row.rname:SetTextColor(dc.r, dc.g, dc.b)
@@ -2687,6 +2691,9 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                     if NS.CB_FetchProfessionRecipes then
                         NS.CB_FetchProfessionRecipes(botKey, effectiveBotName, skillId, true)
                     end
+                    if NS.CB_FetchInventory then
+                        NS.CB_FetchInventory(botKey, effectiveBotName)
+                    end
                 else
                     f.isCrafting = false
                     if f:IsShown() and f.selectedRecipe then
@@ -2720,6 +2727,9 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                         end
                         if NS.CB_FetchProfessionRecipes then
                             NS.CB_FetchProfessionRecipes(botKey, effectiveBotName, skillId, true)
+                        end
+                        if NS.CB_FetchInventory then
+                            NS.CB_FetchInventory(botKey, effectiveBotName)
                         end
                     else
                         f.isCrafting = false
@@ -3475,6 +3485,14 @@ NS.CB_ToggleProfessions = function(key, botName, anchor)
     end
 
     local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local hasItems = entry and entry.inventory and type(entry.inventory.items) == "table"
+    local ttl = NS.INVENTORY_TTL or 30
+    local isFresh = entry and entry.inventoryAt and (GetTime() - entry.inventoryAt) < ttl
+    local inFlight = entry and entry.awaitingInventory
+    if (not hasItems or not isFresh) and not inFlight and NS.CB_FetchInventory then
+        NS.CB_FetchInventory(key, botName)
+    end
+
     local targetProf = f.currentProf
     if entry and entry.professions and #entry.professions > 0 then
         local found = false

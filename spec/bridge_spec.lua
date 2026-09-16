@@ -1056,6 +1056,157 @@ describe("Bridge professions and recipes protocol", function()
     end)
 end)
 
+describe("BotHasTool (Professions.lua)", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = { name = "Artemis" },
+        }
+    end)
+
+    it("returns true when toolName is empty or nil", function()
+        local has = NS.CB_BotHasTool({ botKey = "artemis" }, nil, nil)
+        assert.is_true(has)
+        local has2 = NS.CB_BotHasTool({ botKey = "artemis" }, "", nil)
+        assert.is_true(has2)
+    end)
+
+    it("does not crash when entry.inventory contains numeric stats without items table", function()
+        CleanBot_PartyBots.artemis.inventory = { bagUsed = 8, bagTotal = 20 }
+        local has = NS.CB_BotHasTool({ botKey = "artemis" }, "Blacksmith Hammer", { numAvailable = 0 })
+        assert.is_false(has)
+    end)
+
+    it("handles non-table elements in inventory gracefully", function()
+        CleanBot_PartyBots.artemis.inventory = { items = { 12345, "invalid", true } }
+        local has = NS.CB_BotHasTool({ botKey = "artemis" }, "Blacksmith Hammer", { numAvailable = 0 })
+        assert.is_false(has)
+    end)
+
+    it("returns true when tool is found in inventory.items", function()
+        CleanBot_PartyBots.artemis.inventory = {
+            items = {
+                { itemId = 5956, name = "Blacksmith Hammer" }
+            }
+        }
+        local has = NS.CB_BotHasTool({ botKey = "artemis" }, "Blacksmith Hammer", { numAvailable = 0 })
+        assert.is_true(has)
+    end)
+
+    it("returns false when entry.inventory is nil", function()
+        CleanBot_PartyBots.artemis.inventory = nil
+        local has = NS.CB_BotHasTool({ botKey = "artemis" }, "Blacksmith Hammer", { numAvailable = 0 })
+        assert.is_false(has)
+    end)
+end)
+
+describe("CB_ToggleProfessions background inventory sync", function()
+    local origFetchInv = NS.CB_FetchInventory
+    local origFetchProf = NS.CB_FetchProfessions
+    local origGetFrame = NS.CB_GetProfessionsFrame
+    local origRenderProf = NS.CB_RenderProfessions
+    local fetchInvCalls = 0
+    local dummyFrame
+
+    local function restore()
+        NS.CB_FetchInventory = origFetchInv
+        NS.CB_FetchProfessions = origFetchProf
+        NS.CB_GetProfessionsFrame = origGetFrame
+        NS.CB_RenderProfessions = origRenderProf
+    end
+
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = { name = "Artemis" },
+        }
+        fetchInvCalls = 0
+
+        dummyFrame = {
+            botKey = nil,
+            botName = nil,
+            currentProf = nil,
+            IsShown = function() return false end,
+            Show = function() end,
+            Hide = function() end,
+            GetPoint = function() return "CENTER" end,
+            ClearAllPoints = function() end,
+            SetPoint = function() end,
+        }
+
+        NS.CB_GetProfessionsFrame = function(k, n)
+            return dummyFrame
+        end
+        NS.CB_FetchProfessions = function() end
+        NS.CB_FetchInventory = function(k, n)
+            fetchInvCalls = fetchInvCalls + 1
+        end
+        NS.CB_RenderProfessions = function() end
+    end)
+
+    it("fetches inventory when bot has no inventory items synced", function()
+        CleanBot_PartyBots.artemis.inventory = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(1, fetchInvCalls)
+    end)
+
+    it("fetches inventory when bot has only STATS numeric bag counts but no items table", function()
+        CleanBot_PartyBots.artemis.inventory = { bagUsed = 8, bagTotal = 20 }
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(1, fetchInvCalls)
+    end)
+
+    it("does not fetch inventory when bot already has fresh items synced within INVENTORY_TTL", function()
+        CleanBot_PartyBots.artemis.inventory = {
+            items = { { itemId = 5956, name = "Blacksmith Hammer" } }
+        }
+        CleanBot_PartyBots.artemis.inventoryAt = GetTime()
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(0, fetchInvCalls)
+    end)
+
+    it("refetches inventory when items are older than INVENTORY_TTL", function()
+        CleanBot_PartyBots.artemis.inventory = {
+            items = { { itemId = 5956, name = "Blacksmith Hammer" } }
+        }
+        CleanBot_PartyBots.artemis.inventoryAt = GetTime() - 35
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(1, fetchInvCalls)
+    end)
+
+    it("does not fetch inventory if an inventory request is already in flight", function()
+        CleanBot_PartyBots.artemis.awaitingInventory = true
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(0, fetchInvCalls)
+    end)
+
+    restore()
+end)
+
+describe("INV_END and INV_EXACT_END record inventoryAt timestamp", function()
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = { name = "Artemis", inventory = { items = {} } },
+        }
+    end)
+
+    it("sets inventoryAt on INV_END", function()
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_END~Artemis")
+        assert.is_not_nil(CleanBot_PartyBots.artemis.inventoryAt)
+    end)
+
+    it("sets inventoryAt on INV_EXACT_END", function()
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_EXACT_END~Artemis")
+        assert.is_not_nil(CleanBot_PartyBots.artemis.inventoryAt)
+    end)
+end)
+
 describe("Bridge craft recipe (RUN~CRAFT_RECIPE and PROFESSION_RECIPE_CRAFT)", function()
     before_each(function()
         Mock.reset()

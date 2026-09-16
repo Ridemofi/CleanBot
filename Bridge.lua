@@ -886,6 +886,7 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
                 if entry.invStaging then
                     if entry.invReplyArrived and entry.inventory then
                         entry.inventory.items = entry.invStaging
+                        entry.inventoryAt     = GetTime()
                         -- Inventory just changed (e.g. Sell Trash) — force past the TTL so the
                         -- bag/money totals reflect the new state (in-flight dedup still applies).
                         NS.CB_FetchStats(entry, true)
@@ -1302,6 +1303,7 @@ end
 -- window reuses the cached money/XP/durability instead of re-whispering; older revisits
 -- refetch so the values stay reasonably current.
 NS.STATS_TTL = 30  -- seconds
+NS.INVENTORY_TTL = 30  -- seconds
 
 -- Fetches a bot's "stats" reply (money, bag totals, durability, XP). The reply is
 -- parsed in the awaitingMoney branch of CHAT_MSG_WHISPER (below). "stats" is a query,
@@ -2471,7 +2473,10 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local name = NS.CB_SplitOnce(rest, "~")
             local key  = strlower(name)
             local entry = CleanBot_PartyBots[key]
-            if entry then entry.awaitingInventory = false end   -- bridge data landed
+            if entry then
+                entry.awaitingInventory = false
+                entry.inventoryAt = GetTime()
+            end
             local f    = NS.botInventoryFrames and NS.botInventoryFrames[key]
             if f and f:IsShown() then
                 NS.CB_RenderInventory(key)
@@ -2546,6 +2551,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local entry = CleanBot_PartyBots[key]
             if entry then
                 entry.awaitingInventory = false
+                entry.inventoryAt = GetTime()
                 if entry.inventory then
                     entry.inventory.bagUsed = #entry.inventory.items
                 end
@@ -3033,6 +3039,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
                 local sId = tonumber(spellId) or 0
                 local iId = tonumber(itemId) or 0
+                -- Note on difficulty values ("orange", "yellow", "green", "gray"):
+                -- Recipe difficulty is computed server-side by mod-multibot-bridge
+                -- (MultiBotBridge.cpp: GetRecipeDifficulty). In mod-multibot-bridge,
+                -- GetRecipeDifficulty evaluates thresholds using skillLine->MinSkillLineRank
+                -- rather than skillLine->TrivialSkillLineRankLow, which can cause recipes
+                -- to be classified as "green" earlier than the standard client interface.
                 local diff = CB_UrlDecode(diffEnc or ""):lower()
                 local numAvail = tonumber(craftable) or 0
                 local rawMats = CB_UrlDecode(mEnc or "")
