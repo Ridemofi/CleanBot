@@ -57,7 +57,7 @@ but with no whisper log spam.
 ### Commands — `RUN~`
 
 ```
-RUN~<OPCODE>~BOT~<botName>~~<command>
+RUN~<OPCODE>~BOT~<botName>~<token>~<command>
 ```
 
 Sent by `NS.CB_SendBotCommand` **only** when the effective bridge state is `present` AND

@@ -426,6 +426,12 @@ NS.CB_TagSelfGroup = CB_TagSelfGroup
 -- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for
 -- bridge/simulated commands — NOT to be called directly for ad-hoc whispers; use
 -- CB_SendBotCommand so they serialize.
+local cmdSeq = 0
+local function CB_NextCmdToken(prefix)
+    cmdSeq = (cmdSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "cmd") .. "-" .. tostring(cmdSeq)
+end
+
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
 local function CB_SendBotCommandRaw(botName, command)
@@ -436,7 +442,8 @@ local function CB_SendBotCommandRaw(botName, command)
     if CB_EffectiveBridgeState() == "present" then
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
-            CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. botName .. "~~" .. command)
+            local token = CB_NextCmdToken("cmd")
+            CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. botName .. "~" .. token .. "~" .. command)
             return
         end
     end

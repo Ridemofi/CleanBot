@@ -34,12 +34,25 @@ describe("Bridge command routing", function()
         Mock.party             = 1   -- so CB_SendBridge picks the PARTY channel
     end)
 
-    it("routes an allowlisted combat toggle through the bridge (no whisper)", function()
+    it("routes an allowlisted combat toggle through the bridge with valid token (no whisper)", function()
         NS.CB_SendBotCommand("Bot", "co +focus")
         assert.equals(1, #Mock.addon)
         assert.equals(0, #Mock.whispers)
-        assert.equals("RUN~COMBAT~BOT~Bot~~co +focus", Mock.addon[1].text)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~co %+focus$"))
         assert.equals("PARTY", Mock.addon[1].channel)
+    end)
+
+    it("routes wait for attack and wait for attack time through bridge with valid token", function()
+        NS.CB_SendBotCommand("Bot", "co +wait for attack")
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~co %+wait for attack$"))
+
+        Mock.reset()
+        Mock.party = 1
+        NS.CB_SendBotCommand("Bot", "wait for attack time 5")
+        assert.equals(1, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~wait for attack time 5$"))
     end)
 
     it("whispers a query (co ?) instead of bridging it", function()
