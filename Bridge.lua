@@ -426,11 +426,12 @@ NS.CB_TagSelfGroup = CB_TagSelfGroup
 -- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for
 -- bridge/simulated commands — NOT to be called directly for ad-hoc whispers; use
 -- CB_SendBotCommand so they serialize.
-local cmdSeq = 0
-local function CB_NextCmdToken(prefix)
-    cmdSeq = (cmdSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "cmd") .. "-" .. tostring(cmdSeq)
+local tokenSeq = 0
+local function CB_NextToken(prefix)
+    tokenSeq = (tokenSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "tok") .. "-" .. tostring(tokenSeq)
 end
+NS.CB_NextToken = CB_NextToken
 
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
@@ -442,7 +443,7 @@ local function CB_SendBotCommandRaw(botName, command)
     if CB_EffectiveBridgeState() == "present" then
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
-            local token = CB_NextCmdToken("cmd")
+            local token = CB_NextToken("cmd")
             CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. botName .. "~" .. token .. "~" .. command)
             return
         end
@@ -468,9 +469,8 @@ NS.CB_SendBotCommand = function(botName, command)
 end
 
 local function CB_BeginStateRequest(isGlobal, botName)
-    NS.stateSeq = (NS.stateSeq or 0) + 1
     local suffix = isGlobal and "states" or "state"
-    local token = tostring(math.floor(GetTime() * 1000)) .. "-" .. suffix .. "-" .. tostring(NS.stateSeq)
+    local token = CB_NextToken(suffix)
     NS.stateRequests[token] = {
         token         = token,
         global        = isGlobal == true,
@@ -687,8 +687,7 @@ NS.CB_RequestSpellbook = function(key, botName, force)
     entry.spellbookSeen     = {}
 
     local bName = botName or entry.name or key
-    NS.spellbookSeq = NS.spellbookSeq + 1
-    local token = tostring(math.floor(GetTime() * 1000)) .. "-" .. tostring(NS.spellbookSeq)
+    local token = CB_NextToken("sb")
     entry.spellbookToken = token
 
     CB_SendBridge(string.format("GET~SPELLBOOK~%s~%s", bName, token))
@@ -717,9 +716,8 @@ NS.CB_FetchSpecList = function(key, entry)
 
     if CB_EffectiveBridgeState() == "present" then
         NS.pendingSpecListRequests = NS.pendingSpecListRequests or {}
-        NS.specListSeq = (NS.specListSeq or 0) + 1
         local bName = entry.name or key
-        local token = tostring(math.floor(GetTime() * 1000)) .. "-speclist-" .. tostring(NS.specListSeq)
+        local token = CB_NextToken("speclist")
         NS.pendingSpecListRequests[token] = {
             token   = token,
             class   = entry.class,
@@ -1076,6 +1074,28 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
         end
     end
 
+    -- Safety net for in-flight Bridge bulk sell requests (clears pending flag on network drop/timeout)
+    if NS.bulkSellPending then
+        local now = GetTime()
+        for token, sentAt in pairs(NS.bulkSellPending) do
+            local t = type(sentAt) == "table" and sentAt.sentAt or sentAt
+            if type(t) == "number" and (now - t) >= (NS.QUERY_TIMEOUT or 10.0) then
+                NS.bulkSellPending[token] = nil
+            end
+        end
+    end
+
+    -- Safety net for in-flight Bridge bank withdraw requests (clears pending request on network drop/timeout)
+    if NS.withdrawPending then
+        local now = GetTime()
+        for token, req in pairs(NS.withdrawPending) do
+            local t = type(req) == "table" and (req.sentAt or req.expires) or req
+            if type(t) == "number" and (now - t) >= (NS.QUERY_TIMEOUT or 10.0) then
+                NS.withdrawPending[token] = nil
+            end
+        end
+    end
+
     -- Safety net for in-flight Bridge formations query (clears flags on network drop/timeout)
     if NS.formationsPending then
         NS.formationsTimeout = (NS.formationsTimeout or 0) + dt
@@ -1094,24 +1114,6 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
 end)
 
 NS.pendingBankRequests = NS.pendingBankRequests or {}
-
-local bankSeq = 0
-local function CB_NextBankToken(prefix)
-    bankSeq = (bankSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "bank") .. "-" .. tostring(bankSeq)
-end
-
-local invSeq = 0
-local function CB_NextInvToken(prefix)
-    invSeq = (invSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "inv") .. "-" .. tostring(invSeq)
-end
-
-local recSeq = 0
-local function CB_NextRecToken(prefix)
-    recSeq = (recSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "rec") .. "-" .. tostring(recSeq)
-end
 
 NS.CB_FetchProfessions = function(key, botName, force)
     if not key then return end
@@ -1150,7 +1152,7 @@ NS.CB_FetchProfessionRecipes = function(key, botName, skillId, force)
     end
 
     local bName = (entry and entry.name) or botName or key
-    local token = CB_NextRecToken("rec")
+    local token = CB_NextToken("rec")
     NS.pendingRecipeRequests = NS.pendingRecipeRequests or {}
     NS.pendingRecipeRequests[token] = {
         botKey    = key,
@@ -1162,11 +1164,6 @@ NS.CB_FetchProfessionRecipes = function(key, botName, skillId, force)
     CB_SendBridge(string.format("GET~PROFESSION_RECIPES~%s~%d~%s", bName, sId, token))
 end
 
-local craftSeq = 0
-local function CB_NextCraftToken(prefix)
-    craftSeq = (craftSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "crf") .. "-" .. tostring(craftSeq)
-end
 
 --- Orders a bot to craft a profession recipe via Bridge (RUN~CRAFT_RECIPE~<botName>~<token>~<skillId>~<spellId>~<itemId>).
 ---@param key      string Bot name-key.
@@ -1189,7 +1186,7 @@ NS.CB_BridgeCraftRecipe = function(key, botName, skillId, spellId, itemId, callb
 
     local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
     local bName = (entry and entry.name) or botName or key
-    local token = CB_NextCraftToken("crf")
+    local token = CB_NextToken("crf")
 
     NS.craftPending = NS.craftPending or {}
     NS.craftPending[token] = {
@@ -1231,7 +1228,7 @@ NS.CB_BridgeCraftRecipeTarget = function(key, botName, skillId, spellId, targetB
 
     local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
     local bName = (entry and entry.name) or botName or key
-    local token = CB_NextCraftToken("crt")
+    local token = CB_NextToken("crt")
 
     NS.craftTargetPending = NS.craftTargetPending or {}
     NS.craftTargetPending[token] = {
@@ -1283,7 +1280,7 @@ local function CB_DoFetchInventory(key, botName, manual)
 
     if useBridge then
         if NS.capabilities and NS.capabilities["INVENTORY_EXACT_V1"] then
-            local token = CB_NextInvToken("exinv")
+            local token = CB_NextToken("exinv")
             CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
         else
             CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
@@ -1352,11 +1349,6 @@ NS.CB_FetchStats = function(entry, force)
     end)
 end
 
-local formSeq = 0
-local function CB_NextFormToken(prefix)
-    formSeq = (formSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "forms") .. "-" .. tostring(formSeq)
-end
 
 --- Queries movement formations for all bots in the group via Bridge (GET~FORMATIONS~GROUP~~<token>).
 ---@param force boolean? Re-query even if a query is already in flight.
@@ -1364,7 +1356,7 @@ NS.CB_FetchFormationsBridge = function(force)
     if CB_EffectiveBridgeState() ~= "present" then return end
     if NS.formationsPending and not force then return end
 
-    local token = CB_NextFormToken("forms")
+    local token = CB_NextToken("forms")
     NS.formationsPending = true
     NS.formationsTimeout = 0
     NS.formationsToken   = token
@@ -1381,7 +1373,7 @@ end
 ---@param lowerForm string  Lowercase formation token (must be in BRIDGE_FORMATIONS).
 NS.CB_BridgeSetGroupFormation = function(lowerForm)
     if not lowerForm or not BRIDGE_FORMATIONS[lowerForm] then return end
-    local token = CB_NextFormToken("setform")
+    local token = CB_NextToken("setform")
     CB_SendBridge("RUN~FORMATION~GROUP~~" .. token .. "~" .. lowerForm)
 
     -- Optimistic cache for all known group members
@@ -1456,7 +1448,7 @@ local function CB_DoFetchBank(key, botName, manual)
     end
 
     if useBridge then
-        local token = CB_NextBankToken("bank")
+        local token = CB_NextToken("bank")
         NS.pendingBankRequests[token] = {
             key = key,
             botName = botName,
@@ -1556,8 +1548,8 @@ end
 NS.bulkSellPending = NS.bulkSellPending or {}
 NS.CB_BridgeBulkSell = function(key, botName)
     if CB_EffectiveBridgeState() == "present" then
-        local token = CB_NextInvToken("bsell")
-        NS.bulkSellPending[token] = true
+        local token = CB_NextToken("bsell")
+        NS.bulkSellPending[token] = GetTime()
         CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~SELL_GREY~0~0")
     else
         NS.CB_SendBotCommand(botName, "s gray")
@@ -1574,7 +1566,7 @@ NS.CB_BridgeGroupBulkSell = function()
         NS.groupSellPending = pending
         local function addBot(key, name)
             pending.expected[key] = true
-            local token = CB_NextInvToken("gbsell")
+            local token = CB_NextToken("gbsell")
             CB_SendBridge("RUN~ITEM_ACTION~" .. name .. "~" .. token .. "~SELL_GREY~0~0")
         end
         if NS.CB_ForEachGroupMember then
@@ -1620,7 +1612,7 @@ NS.CB_BridgeEquipItem = function(key, botName, link, cell)
         if hasExact then
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
-            local token = CB_NextInvToken("equip")
+            local token = CB_NextToken("equip")
             CB_SendBridge("RUN~ITEM_EQUIP~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_After(1.5, function()
                 NS.CB_FetchInventory(key, botName)
@@ -1662,7 +1654,7 @@ NS.CB_BridgeUseItem = function(key, botName, link, cell)
         if hasExact then
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
-            local token = CB_NextInvToken("use")
+            local token = CB_NextToken("use")
             CB_SendBridge("RUN~ITEM_USE~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
@@ -1687,7 +1679,7 @@ NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
         if hasExact then
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
-            local token = CB_NextInvToken("destroy")
+            local token = CB_NextToken("destroy")
             CB_SendBridge("RUN~ITEM_DESTROY~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
@@ -1712,7 +1704,7 @@ NS.CB_BridgeSellItem = function(key, botName, link, cell)
         if hasExact then
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
-            local token = CB_NextInvToken("sell")
+            local token = CB_NextToken("sell")
             CB_SendBridge("RUN~ITEM_SELL~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
@@ -1739,7 +1731,7 @@ NS.CB_BridgeDepositItem = function(botName, action, cell)
     if itemId <= 0 then return false end
     local count = cell.count or 1
 
-    local token = CB_NextBankToken("dep")
+    local token = CB_NextToken("dep")
     CB_SendBridge("RUN~ITEM_DEPOSIT_EXACT~" .. botName .. "~" .. token .. "~" .. action .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
     return true
 end
@@ -1758,8 +1750,8 @@ NS.CB_BridgeWithdrawItem = function(key, botName, link, count)
     local itemId = tonumber(strmatch(link or "", "item:(%d+)")) or 0
     if itemId <= 0 then return false end
 
-    local token = CB_NextInvToken("wdraw")
-    NS.withdrawPending[token] = { key = key, botName = botName }
+    local token = CB_NextToken("wdraw")
+    NS.withdrawPending[token] = { key = key, botName = botName, sentAt = GetTime() }
     CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~BANK_WITHDRAW~" .. tostring(itemId) .. "~" .. tostring(count or 1))
     NS.CB_ScheduleReconcile(key, botName)
     return true

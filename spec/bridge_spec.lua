@@ -1455,3 +1455,72 @@ describe("Bridge craft recipe target (RUN~CRAFT_RECIPE_TARGET and CRAFT_RECIPE_T
         assert.is_nil(NS.craftTargetPending[token])
     end)
 end)
+
+describe("Centralized token generation (CB_NextToken)", function()
+    local NS = CleanBotNS
+
+    it("generates tokens conforming to bridge protocol requirements", function()
+        local tok1 = NS.CB_NextToken("test")
+        assert.is_not_nil(tok1)
+        assert.is_not_nil(tok1:match("^%d+%-test%-%d+$"))
+        assert.is_true(#tok1 <= 64)
+        assert.is_not_nil(tok1:match("^[a-zA-Z0-9_.:%-]+$"))
+    end)
+
+    it("uses default 'tok' prefix when prefix is omitted", function()
+        local tok = NS.CB_NextToken()
+        assert.is_not_nil(tok:match("^%d+%-tok%-%d+$"))
+    end)
+
+    it("increments sequence numbers monotonically", function()
+        local tok1 = NS.CB_NextToken("seq")
+        local tok2 = NS.CB_NextToken("seq")
+        local s1 = tonumber(tok1:match("%-(%d+)$"))
+        local s2 = tonumber(tok2:match("%-(%d+)$"))
+        assert.is_not_nil(s1)
+        assert.is_not_nil(s2)
+        assert.is_true(s2 > s1)
+    end)
+
+    it("uses standardized sb prefix for spellbook tokens", function()
+        Mock.reset()
+        Mock.party = 1
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.bridgeState = "present"
+        NS.CB_RequestSpellbook("bot", "Bot", false)
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^GET~SPELLBOOK~Bot~%d+%-sb%-%d+$"))
+    end)
+
+    it("purges stale bulkSellPending entries after timeout", function()
+        Mock.reset()
+        Mock.party = 1
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.bridgeState = "present"
+        NS.CB_BridgeBulkSell("bot", "Bot")
+
+        local token = Mock.addon[1].text:match("^RUN~ITEM_ACTION~Bot~([^~]+)~SELL_GREY~0~0$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.bulkSellPending[token])
+
+        Mock.tick(10.1)
+        assert.is_nil(NS.bulkSellPending[token])
+    end)
+
+    it("purges stale withdrawPending entries after timeout", function()
+        Mock.reset()
+        Mock.party = 1
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+        NS.bridgeState = "present"
+        local sent = NS.CB_BridgeWithdrawItem("bot", "Bot", "|Hitem:12345|h[Item]|h", 1)
+        assert.is_true(sent)
+
+        local token = Mock.addon[1].text:match("^RUN~ITEM_ACTION~Bot~([^~]+)~BANK_WITHDRAW~12345~1$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.withdrawPending[token])
+
+        Mock.tick(10.1)
+        assert.is_nil(NS.withdrawPending[token])
+    end)
+end)
+
