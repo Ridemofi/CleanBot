@@ -506,12 +506,8 @@ NS.CB_RequestSync = function()
         if CB_EffectiveBridgeState() == "present" then
             CB_SendBridge("GET~ROSTER")
             CB_SendBridge("GET~DETAILS")
-            if NS.stateFramingCapable then
-                local token = CB_BeginStateRequest(true)
-                CB_SendBridge("GET~STATES~" .. token)
-            else
-                CB_SendBridge("GET~STATES")
-            end
+            local token = CB_BeginStateRequest(true)
+            CB_SendBridge("GET~STATES~" .. token)
             if NS.CB_FetchFormationsBridge then
                 NS.CB_FetchFormationsBridge()
             end
@@ -540,12 +536,8 @@ NS.CB_RequestStates = function()
     NS.CB_After(0.4, function()
         NS.statesPending = false
         if CB_EffectiveBridgeState() == "present" then
-            if NS.stateFramingCapable then
-                local token = CB_BeginStateRequest(true)
-                CB_SendBridge("GET~STATES~" .. token)
-            else
-                CB_SendBridge("GET~STATES")
-            end
+            local token = CB_BeginStateRequest(true)
+            CB_SendBridge("GET~STATES~" .. token)
         end
     end)
 end
@@ -1279,20 +1271,17 @@ local function CB_DoFetchInventory(key, botName, manual)
     end
 
     if useBridge then
-        if NS.capabilities and NS.capabilities["INVENTORY_EXACT_V1"] then
-            local token = CB_NextToken("exinv")
-            CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
-        else
-            CB_SendBridge("GET~INVENTORY~" .. botName .. "~inv")
-        end
-    else
-        -- invStaging is the whisper-path marker: its presence tells the tick to run the
-        -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
-        -- swapped into entry.inventory.items atomically once collection completes.
-        -- Raw send: this already runs from the queue (CB_FetchInventory enqueued it).
-        entry.invStaging = {}
-        CB_SendBotCommandRaw(botName, "items")
+        local token = CB_NextToken("exinv")
+        CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
+        return
     end
+
+    -- invStaging is the whisper-path marker: its presence tells the tick to run the
+    -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
+    -- swapped into entry.inventory.items atomically once collection completes.
+    -- Raw send: this already runs from the queue (CB_FetchInventory enqueued it).
+    entry.invStaging = {}
+    CB_SendBotCommandRaw(botName, "items")
 end
 
 -- Enqueues an inventory fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
