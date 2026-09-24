@@ -116,8 +116,15 @@ describe("CB_IsItemDisenchantable", function()
 end)
 
 describe("CB_StartDisenchantWatcher", function()
+    local origFetchInv = NS.CB_FetchInventory
+    local origSetInventoryLoading = NS.CB_SetInventoryLoading
     local fetched
     local loadingStates
+
+    local function restore()
+        NS.CB_FetchInventory = origFetchInv
+        NS.CB_SetInventoryLoading = origSetInventoryLoading
+    end
 
     before_each(function()
         Mock.reset()
@@ -226,5 +233,7 @@ describe("CB_StartDisenchantWatcher", function()
         assert.equals("Bot1", fetched[1].name)
         assert.is_nil(CleanBot_PartyBots.bot1.isDisenchanting)
     end)
+
+    restore()
 end)
 

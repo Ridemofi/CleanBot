@@ -1271,6 +1271,9 @@ local function CB_DoFetchInventory(key, botName, manual)
     end
 
     if useBridge then
+        if NS.CB_FetchStats then
+            NS.CB_FetchStats(entry, true)
+        end
         local token = CB_NextToken("exinv")
         CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
         return
@@ -1508,10 +1511,6 @@ end)
 ---@param botName string        Bot's display name (whisper/bridge target).
 ---@param anchor  table|string? Placement forwarded to CB_ToggleInventory ("CENTER", a frame, or nil).
 NS.CB_RequestInventory = function(key, botName, anchor)
-    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
-    if entry and NS.CB_FetchStats then
-        NS.CB_FetchStats(entry, true)
-    end
     NS.CB_FetchInventory(key, botName)
     NS.CB_ToggleInventory(key, botName, anchor)
 end
