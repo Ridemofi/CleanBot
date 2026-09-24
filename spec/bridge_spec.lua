@@ -1524,3 +1524,63 @@ describe("Centralized token generation (CB_NextToken)", function()
     end)
 end)
 
+describe("CB_RequestInventory orchestration", function()
+    local origFetchStats  = NS.CB_FetchStats
+    local origFetchInv    = NS.CB_FetchInventory
+    local origToggleInv   = NS.CB_ToggleInventory
+    local statsCalls, invCalls, toggleCalls
+
+    local function restore()
+        NS.CB_FetchStats      = origFetchStats
+        NS.CB_FetchInventory  = origFetchInv
+        NS.CB_ToggleInventory = origToggleInv
+    end
+
+    before_each(function()
+        Mock.reset()
+        statsCalls, invCalls, toggleCalls = {}, {}, {}
+        NS.CB_FetchStats = function(entry, force)
+            table.insert(statsCalls, { entry = entry, force = force })
+        end
+        NS.CB_FetchInventory = function(k, n)
+            table.insert(invCalls, { key = k, botName = n })
+        end
+        NS.CB_ToggleInventory = function(k, n, a)
+            table.insert(toggleCalls, { key = k, botName = n, anchor = a })
+        end
+    end)
+
+    it("triggers forced CB_FetchStats and fetches inventory on valid bot", function()
+        CleanBot_PartyBots = { artemis = { name = "Artemis" } }
+        NS.CB_RequestInventory("artemis", "Artemis", "CENTER")
+
+        assert.equals(1, #statsCalls)
+        assert.equals(CleanBot_PartyBots.artemis, statsCalls[1].entry)
+        assert.is_true(statsCalls[1].force)
+
+        assert.equals(1, #invCalls)
+        assert.equals("artemis", invCalls[1].key)
+        assert.equals("Artemis", invCalls[1].botName)
+
+        assert.equals(1, #toggleCalls)
+        assert.equals("artemis", toggleCalls[1].key)
+        assert.equals("Artemis", toggleCalls[1].botName)
+        assert.equals("CENTER", toggleCalls[1].anchor)
+        restore()
+    end)
+
+    it("handles missing bot entry gracefully without invoking CB_FetchStats", function()
+        CleanBot_PartyBots = {}
+        NS.CB_RequestInventory("unknown", "Unknown", nil)
+
+        assert.equals(0, #statsCalls)
+        assert.equals(1, #invCalls)
+        assert.equals("unknown", invCalls[1].key)
+        assert.equals(1, #toggleCalls)
+        assert.equals("unknown", toggleCalls[1].key)
+        restore()
+    end)
+
+    restore()
+end)
+
