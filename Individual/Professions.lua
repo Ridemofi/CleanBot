@@ -1723,7 +1723,11 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     f:RegisterForDrag("LeftButton")
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    f:SetScript("OnShow", function(self)
+        PlaySound("igCharacterInfoOpen")
+    end)
     f:SetScript("OnHide", function(self)
+        PlaySound("igCharacterInfoClose")
         if self.RankBar then
             stopRankAnim(self.RankBar)
             self.RankBar._snapNext = true
@@ -2356,9 +2360,11 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                 return
             end
             if self.isCat and self.catKey then
+                PlaySound("igMainMenuOptionCheckBoxOn")
                 f.collapsedCats[self.catKey] = not f.collapsedCats[self.catKey]
                 RefreshRecipeList(f)
             elseif self.recipe then
+                PlaySound("igMainMenuOptionCheckBoxOn")
                 SelectRecipe(f, self.recipe)
             end
         end)
@@ -2605,7 +2611,10 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     minusBtn:Hide()
     minusBtn:SetScript("OnClick", function()
         local n = tonumber(qtyBox:GetText()) or 1
-        if n > 1 then qtyBox:SetText(tostring(n - 1)) end
+        if n > 1 then
+            PlaySound("igMainMenuOptionCheckBoxOn")
+            qtyBox:SetText(tostring(n - 1))
+        end
     end)
 
     local plusBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -2619,7 +2628,10 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         local n = tonumber(qtyBox:GetText()) or 1
         local maxN = (f.selectedRecipe and f.selectedRecipe.numAvailable) or 99
         if maxN < 1 then maxN = 1 end
-        if n < maxN then qtyBox:SetText(tostring(n + 1)) end
+        if n < maxN then
+            PlaySound("igMainMenuOptionCheckBoxOn")
+            qtyBox:SetText(tostring(n + 1))
+        end
     end)
 
     local createAllBtn = CreateFrame("Button", "CleanBotProfessionsCreateAllBtn", f, "UIPanelButtonTemplate")
@@ -3131,6 +3143,8 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         if not r or not r.spellId then return end
         if not (r.numAvailable and r.numAvailable > 0) then return end
 
+        PlaySound("igMainMenuOption")
+
         local hasItem = r.itemId and r.itemId > 0
         if not hasItem then
             local picker = buildTargetPicker(f, createBtn)
@@ -3346,9 +3360,10 @@ NS.CB_RenderProfessions = function(f, profName)
 
     -- Portrait icon
     if f.portrait and prof.portrait then
-        f.portrait:SetTexture(prof.portrait)
-        if f.portrait.SetMask then
-            f.portrait:SetMask("Interface\\CharacterFrame\\TempPortraitAlphaMask")
+        if type(prof.portrait) == "string" and prof.portrait:lower():find("^interface\\icons\\") and SetPortraitToTexture then
+            SetPortraitToTexture(f.portrait, prof.portrait)
+        else
+            f.portrait:SetTexture(prof.portrait)
         end
     end
 
