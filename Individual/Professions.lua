@@ -48,7 +48,7 @@ local SCROLL_THUMB_CAP = P .. "5142787-minimal-scrollbar-small.blp"
 -- ── Geometry Constants ───────────────────────────────────────────────────
 local FRAME_W          = 942
 local FRAME_H          = 658
-local UI_SCALE         = 0.72      -- ≈ 678x474 px on screen (90% del tamaño actual)
+local UI_SCALE         = 0.7       -- ≈ 659x461 px on screen
 
 local RECIPELIST_W     = 274
 local RECIPELIST_TL    = { 5, -72 }
@@ -161,6 +161,11 @@ local ATLAS = {
     closeNormal     = { file = CLOSE_SHEET,   left = 0.152344, right = 0.292969, top = 0.007812, bottom = 0.304688 },
     closePressed    = { file = CLOSE_SHEET,   left = 0.152344, right = 0.292969, top = 0.632812, bottom = 0.929688 },
     closeHighlight  = { file = CLOSE_SHEET,   left = 0.449219, right = 0.589844, top = 0.007812, bottom = 0.304688 },
+
+    -- Side tabs
+    sideTab         = { file = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\commonsidetabc60.blp", left = 0.007812, right = 0.4375,   top = 0.007812, bottom = 0.476562 },
+    sideTabHover    = { file = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\commonsidetabc60.blp", left = 0.007812, right = 0.4375,   top = 0.492188, bottom = 0.960938 },
+    sideTabSelected = { file = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\commonsidetabc60.blp", left = 0.453125, right = 0.882812, top = 0.007812, bottom = 0.476562 },
 }
 
 local function ApplyAtlas(tex, info)
@@ -1584,14 +1589,15 @@ local function buildCogMenu(f, cog)
     return menu
 end
 
--- ── Profession Dropdown Menu (Dropdown Triggered from Header) ──────────────
+-- ── Bot Selector Dropdown Menu (Dropdown Triggered from Header) ───────────
+local GetFirstValidProf
 local function buildProfDropdown(f, headerBtn)
     if f.ProfDropdown then return f.ProfDropdown end
 
     local menu = CreateFrame("Frame", "CleanBotProfessionsDropdownMenu", headerBtn)
     menu:SetFrameStrata("DIALOG")
     menu:SetPoint("TOP", headerBtn, "BOTTOM", 0, -2)
-    menu:SetWidth(220)
+    menu:SetWidth(180)
     if menu.SetBackdrop then
         menu:SetBackdrop({
             bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
@@ -1604,26 +1610,58 @@ local function buildProfDropdown(f, headerBtn)
     menu:Hide()
     menu:EnableMouse(true)
 
-    local ROW_H = 26
+    local ROW_H = 22
     local items = {}
 
-    local sampleProfs = {
-        { name = "Engineering", key = "Engineering", cur = 150, max = 225 },
-        { name = "Mining",      key = "Mining",      cur = 225, max = 300 },
-        { name = "Cooking",     key = "Cooking",     cur = 75,  max = 150 },
-    }
-
     menu.Refresh = function()
-        local list = sampleProfs
-        local entry = CleanBot_PartyBots and f.botKey and CleanBot_PartyBots[f.botKey]
-        if entry and entry.professions and #entry.professions > 0 then
-            list = entry.professions
+        local list = {}
+        if NS.desiredBots and #NS.desiredBots > 0 then
+            for _, d in ipairs(NS.desiredBots) do
+                list[#list + 1] = {
+                    key   = d.key,
+                    name  = d.name,
+                    class = d.class,
+                }
+            end
+        elseif CleanBot_PartyBots then
+            for k, entry in pairs(CleanBot_PartyBots) do
+                if entry and entry.name then
+                    list[#list + 1] = {
+                        key   = k,
+                        name  = entry.name,
+                        class = entry.class,
+                    }
+                end
+            end
+            table.sort(list, function(a, b) return (a.name or "") < (b.name or "") end)
         end
 
-        local totalH = 14 + (#list * ROW_H) + 6
+        local totalH = 14 + (math.max(#list, 1) * ROW_H) + 6
         menu:SetHeight(totalH)
 
-        for i, p in ipairs(list) do
+        if #list == 0 then
+            local emptyRow = items[1]
+            if not emptyRow then
+                emptyRow = CreateFrame("Button", nil, menu)
+                emptyRow:SetHeight(ROW_H)
+                emptyRow:SetPoint("LEFT", menu, "LEFT", 8, 0)
+                emptyRow:SetPoint("RIGHT", menu, "RIGHT", -8, 0)
+                local label = emptyRow:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+                label:SetPoint("LEFT", emptyRow, "LEFT", 8, 0)
+                label:SetJustifyH("LEFT")
+                emptyRow.label = label
+                items[1] = emptyRow
+            end
+            emptyRow:SetPoint("TOP", menu, "TOP", 0, -8)
+            emptyRow.label:SetText("No bots in party")
+            emptyRow.botKey = nil
+            if emptyRow.selTex then emptyRow.selTex:Hide() end
+            emptyRow:Show()
+            for i = 2, #items do items[i]:Hide() end
+            return
+        end
+
+        for i, b in ipairs(list) do
             local row = items[i]
             if not row then
                 row = CreateFrame("Button", nil, menu)
@@ -1631,53 +1669,86 @@ local function buildProfDropdown(f, headerBtn)
                 row:SetPoint("LEFT", menu, "LEFT", 8, 0)
                 row:SetPoint("RIGHT", menu, "RIGHT", -8, 0)
 
-                local icon = row:CreateTexture(nil, "ARTWORK")
-                icon:SetSize(20, 20)
-                icon:SetPoint("LEFT", row, "LEFT", 4, 0)
-                if icon.SetMask then
-                    icon:SetMask("Interface\\CharacterFrame\\TempPortraitAlphaMask")
-                end
-                row.icon = icon
+                local sel = row:CreateTexture(nil, "BACKGROUND")
+                sel:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+                sel:SetBlendMode("ADD")
+                sel:SetAllPoints()
+                sel:SetAlpha(0.35)
+                row.selTex = sel
 
                 local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                label:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+                label:SetPoint("LEFT", row, "LEFT", 8, 0)
                 label:SetJustifyH("LEFT")
                 row.label = label
-
-                local rank = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-                rank:SetPoint("RIGHT", row, "RIGHT", -6, 0)
-                rank:SetJustifyH("RIGHT")
-                rank:SetTextColor(0.8, 0.8, 0.8)
-                row.rank = rank
 
                 local hov = row:CreateTexture(nil, "HIGHLIGHT")
                 hov:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
                 hov:SetBlendMode("ADD")
                 hov:SetAllPoints()
-                hov:SetAlpha(0.5)
+                hov:SetAlpha(0.4)
 
                 row:SetScript("OnClick", function(self)
-                    if self.profKey and NS.CB_RenderProfessions then
-                        NS.CB_RenderProfessions(f, self.profKey)
-                    end
                     menu:Hide()
+                    local bKey = self.botKey
+                    local bName = self.botName or bKey
+                    if not bKey then return end
+                    if bKey ~= f.botKey then
+                        f.botKey         = bKey
+                        f.botName        = bName
+                        f.selectedRecipe = nil
+                        f.currentProf    = nil
+                        f.rawRecipes     = nil
+                        f.recipeTree     = {}
+                        RefreshRecipeList(f)
+                        SelectRecipe(f, nil)
+
+                        if NS.CB_FetchProfessions then
+                            NS.CB_FetchProfessions(bKey, bName)
+                        end
+                        local entry = CleanBot_PartyBots and CleanBot_PartyBots[bKey]
+                        local hasItems = entry and entry.inventory and type(entry.inventory.items) == "table"
+                        local ttl = NS.INVENTORY_TTL or 30
+                        local isFresh = entry and entry.inventoryAt and (GetTime() - entry.inventoryAt) < ttl
+                        local inFlight = entry and entry.awaitingInventory
+                        if (not hasItems or not isFresh) and not inFlight and NS.CB_FetchInventory then
+                            NS.CB_FetchInventory(bKey, bName)
+                        end
+
+                        local targetProf = GetFirstValidProf(entry)
+                        if targetProf and NS.CB_RenderProfessions then
+                            NS.CB_RenderProfessions(f, targetProf)
+                        else
+                            UpdateSideTabs(f)
+                            if f.title then
+                                local botClass = (entry and entry.class)
+                                local c = botClass and RAID_CLASS_COLORS and RAID_CLASS_COLORS[botClass]
+                                local formattedBot = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, bName) or bName
+                                f.title:SetText(string.format("%s (%s)", _G.TRADE_SKILLS or "Professions", formattedBot))
+                            end
+                        end
+                    end
                 end)
 
                 items[i] = row
             end
 
             row:SetPoint("TOP", menu, "TOP", 0, -(8 + (i - 1) * ROW_H))
-            row.profKey = p.name or p.key
-            local pCfg = GetProfConfig(p.name or p.key)
-            local ic = p.icon or (pCfg and pCfg.portrait) or "Interface\\Icons\\INV_Misc_QuestionMark"
-            row.icon:SetTexture(ic)
-            row.label:SetText(p.name or p.key)
-            row.rank:SetText(string.format("%d/%d", p.cur or 0, p.max or 0))
+            row.botKey = b.key
+            row.botName = b.name
+            row.label:SetText(b.name)
 
-            if f.currentProf and (f.currentProf == p.name or f.currentProf == p.key or (p.name and f.currentProf:lower() == p.name:lower())) then
+            local isSelected = (f.botKey and b.key:lower() == f.botKey:lower())
+            if isSelected then
+                row.selTex:Show()
                 row.label:SetTextColor(1, 0.82, 0)
             else
-                row.label:SetTextColor(1, 1, 1)
+                row.selTex:Hide()
+                local c = b.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[b.class]
+                if c then
+                    row.label:SetTextColor(c.r, c.g, c.b)
+                else
+                    row.label:SetTextColor(1, 1, 1)
+                end
             end
             row:Show()
         end
@@ -1704,12 +1775,180 @@ local function buildProfDropdown(f, headerBtn)
     return menu
 end
 
+-- ── Side Tabs ────────────────────────────────────────────────────────────
+local TAB = { side = 55, y = -60, gap = -2, icon = 50, iconX = -3, crop = 0.03125 }
+local TAB_ICONS = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\"
+local PRIMARY_ORDER = {
+    "Alchemy", "Blacksmithing", "Enchanting", "Engineering", "Herbalism", "Inscription",
+    "Jewelcrafting", "Leatherworking", "Mining", "Skinning", "Tailoring",
+}
+local TAB_SECONDARY = { "First Aid", "Cooking" }
+local TAB_ICON = {
+    Alchemy        = "trade_alchemy",
+    Blacksmithing  = "trade_blacksmithing",
+    Enchanting     = "trade_engraving",
+    Engineering    = "trade_engineering",
+    Inscription    = "inv_inscription_tradeskill01",
+    Jewelcrafting  = "inv_misc_gem_01",
+    Leatherworking = "trade_leatherworking",
+    Mining         = "trade_mining",
+    Tailoring      = "trade_tailoring",
+    ["First Aid"]  = "spell_holy_sealofsacrifice",
+    Cooking        = "inv_misc_food_15",
+}
+
+local function placeTabIcon(b, dx, dy)
+    b.icon:ClearAllPoints()
+    b.icon:SetPoint("CENTER", b, "CENTER", TAB.iconX + dx, dy)
+end
+
+local function createSideTab(parent, name)
+    local b = CreateFrame("Button", name, parent)
+    b:SetSize(TAB.side, TAB.side)
+    b:RegisterForClicks("LeftButtonUp")
+
+    local bg = b:CreateTexture(nil, "BACKGROUND")
+    ApplyAtlas(bg, ATLAS.sideTab)
+    bg:SetAllPoints(b)
+
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetSize(TAB.icon, TAB.icon)
+    b.icon:SetTexCoord(TAB.crop, 1 - TAB.crop, TAB.crop, 1 - TAB.crop)
+    placeTabIcon(b, 0, 0)
+
+    b.selected = b:CreateTexture(nil, "OVERLAY")
+    ApplyAtlas(b.selected, ATLAS.sideTabSelected)
+    b.selected:SetAllPoints(b)
+    b.selected:Hide()
+
+    local hover = b:CreateTexture(nil, "HIGHLIGHT")
+    ApplyAtlas(hover, ATLAS.sideTabHover)
+    hover:SetAllPoints(b)
+
+    b:SetScript("OnEnter", function(self)
+        if not self.tooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT", -4, -4)
+        GameTooltip:SetText(self.tooltip)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnMouseDown", function(self) placeTabIcon(self, 1, -1) end)
+    b:SetScript("OnMouseUp", function(self)
+        placeTabIcon(self, 0, 0)
+    end)
+    return b
+end
+
+local function buildSideTabs(f)
+    if f.SideTabs then return f.SideTabs end
+    local c = CreateFrame("Frame", "CleanBot_ProfessionsTabs", f)
+    c:SetSize(TAB.side, 1)
+    c:SetPoint("TOPLEFT", f, "TOPRIGHT", 0, 0)
+    c:SetFrameStrata(f:GetFrameStrata())
+    c:SetFrameLevel((f:GetFrameLevel() or 1) + 1)
+
+    -- Overview tab (top header icon, no click action)
+    local ov = createSideTab(c, "CleanBot_ProfessionsTab0")
+    ov.icon:SetTexture(TAB_ICONS .. "inv_sidetab_professions_c60")
+    ov.tooltip = _G.TRADE_SKILLS or "Professions"
+    ov:SetPoint("TOPLEFT", c, "TOPLEFT", 0, TAB.y)
+    ov:SetScript("OnClick", function() end)
+
+    c.overview = ov
+    c.professions = {}
+    f.SideTabs = c
+    return c
+end
+
+local function professionSideTab(c, k)
+    if not c.professions[k] then
+        local b = createSideTab(c, "CleanBot_ProfessionsTab" .. k)
+        b:SetPoint("TOPLEFT", k == 1 and c.overview or c.professions[k - 1], "BOTTOMLEFT", 0, TAB.gap)
+        c.professions[k] = b
+    end
+    return c.professions[k]
+end
+
+local function UpdateSideTabs(f)
+    if not f then return end
+    local c = f.SideTabs or buildSideTabs(f)
+    if not c then return end
+
+    local key = f.botKey
+    local entry = CleanBot_PartyBots and key and CleanBot_PartyBots[key]
+    local list = (entry and entry.professions) or {}
+
+    local skills = {}
+    for _, p in ipairs(list) do
+        local cfg = GetProfConfig(p.key or p.name)
+        local profKey = (cfg and cfg.title) or p.name or p.key
+        if profKey then
+            skills[profKey] = p
+            if p.key and p.key ~= profKey then
+                skills[p.key] = p
+            end
+        end
+    end
+
+    local renderList = {}
+    local function add(profKey)
+        local d = skills[profKey]
+        if d and TAB_ICON[profKey] then
+            renderList[#renderList + 1] = { key = profKey, d = d }
+        end
+    end
+    for _, k in ipairs(PRIMARY_ORDER) do add(k) end
+    for _, k in ipairs(TAB_SECONDARY) do add(k) end
+
+    local curProf = f.currentProf and f.currentProf:lower()
+
+    for k, e in ipairs(renderList) do
+        local b = professionSideTab(c, k)
+        local sel = (curProf and (e.key:lower() == curProf or (e.d.key and e.d.key:lower() == curProf)))
+        b.key = e.key
+        b.icon:SetTexture(TAB_ICONS .. TAB_ICON[e.key])
+        b.tooltip = e.d.name
+        if sel then b.selected:Show() else b.selected:Hide() end
+        b:SetScript("OnClick", function(self)
+            PlaySound("igCharacterInfoTab")
+            NS.CB_RenderProfessions(f, self.key)
+        end)
+        b:Show()
+    end
+
+    for k = #renderList + 1, #c.professions do
+        c.professions[k]:Hide()
+    end
+
+    c:SetHeight(-TAB.y + (#renderList + 1) * (TAB.side - TAB.gap))
+    c:Show()
+end
+
+GetFirstValidProf = function(entry)
+    if not (entry and entry.professions) then return nil end
+    local skills = {}
+    for _, p in ipairs(entry.professions) do
+        local cfg = GetProfConfig(p.key or p.name)
+        local profKey = (cfg and cfg.title) or p.name or p.key
+        if profKey then
+            skills[profKey] = p
+            if p.key and p.key ~= profKey then
+                skills[p.key] = p
+            end
+        end
+    end
+    for _, k in ipairs(PRIMARY_ORDER) do
+        if skills[k] and TAB_ICON[k] then return k end
+    end
+    for _, k in ipairs(TAB_SECONDARY) do
+        if skills[k] and TAB_ICON[k] then return k end
+    end
+end
+
 -- ── Main Professions Frame Construction ──────────────────────────────────
 NS.CB_GetProfessionsFrame = function(key, botName)
     local f = NS.botProfessionsFrame
     if f then
-        f.botKey  = key
-        f.botName = botName or key
         loadOpts(f)
         return f
     end
@@ -1730,7 +1969,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         PlaySound("igCharacterInfoClose")
         if self.RankBar then
             stopRankAnim(self.RankBar)
-            self.RankBar._snapNext = true
             if self.RankBar.fill then
                 StopFlipAnimation(self.RankBar.fill)
                 self.RankBar._flipping = false
@@ -1839,12 +2077,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     end
     f.portrait = portrait
 
-    -- Portrait Clickable Trigger
-    local portraitBtn = CreateFrame("Button", nil, ns)
-    portraitBtn:SetAllPoints(portrait)
-    portraitBtn:SetFrameLevel((ns:GetFrameLevel() or 20) + 5)
-    f.portraitBtn = portraitBtn
-
     -- ── 5. Window Title Header Button (Interactive Dropdown Trigger) ───────
     local headerBtn = CreateFrame("Button", "CleanBotProfessionsHeaderBtn", ns)
     headerBtn:SetHeight(20)
@@ -1882,7 +2114,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     end
 
     headerBtn:SetScript("OnClick", toggleDropdown)
-    portraitBtn:SetScript("OnClick", toggleDropdown)
 
     -- ── 6. Red Close Button ───────────────────────────────────────────────
     local closeBtn = CreateFrame("Button", "CleanBotProfessionsClose", f)
@@ -1912,27 +2143,18 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     rbBg:SetPoint("TOPLEFT", rb, "TOPLEFT", 0, 0)
     rbBg:SetSize(451, 29)
 
-    -- Themed profession flipbook fill
-    local fillFrac = 117 / 150
-    local fillW = math.floor(FILL_MAXW * fillFrac)
-
-    local engInfo = PROF_CONFIG["Engineering"]
-
+    -- Themed profession flipbook fill (hidden until populated)
     local fill = rb:CreateTexture(nil, "ARTWORK", nil, 2)
-    fill:SetTexture(engInfo.flip)
     fill:SetPoint("TOPLEFT", rb, "TOPLEFT", FILL_X, FILL_Y)
-    fill:SetSize(fillW, FILL_H)
+    fill:SetHeight(FILL_H)
     fill:SetBlendMode("BLEND")
-    fill._frac = fillFrac
+    fill:Hide()
     rb.fill = fill
-
-    StartFlipAnimation(fill, engInfo.flip, engInfo, fillFrac)
 
     -- Flare on moving crest (ARTWORK 3: under border OVERLAY 1)
     local flare = rb:CreateTexture(nil, "ARTWORK", nil, 3)
-    flare:SetTexture(engInfo.flip)
     flare:SetBlendMode("ADD")
-    positionFlare(flare, fill, engInfo.top, fillW)
+    flare:Hide()
     rb.flare = flare
 
     local rbFrame = rb:CreateTexture(nil, "OVERLAY", nil, 1)
@@ -1946,9 +2168,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         if fn then rbText:SetFont(fn, 12, "OUTLINE") end
     end
     rbText:SetPoint("CENTER", rb, "CENTER", 0, 3)
-    rbText:SetText("117 / 150")
     rb.text = rbText
-    rb._snapNext = true
 
     -- Chat Link Button
     local linkBtn = CreateFrame("Button", nil, f)
@@ -1957,9 +2177,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     linkBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-Chat-Up")
     linkBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-Chat-Down")
     linkBtn:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    linkBtn:SetScript("OnClick", function()
-        if NS.CB_Print then NS.CB_Print("Engineering (117/150)") end
-    end)
     f.linkBtn = linkBtn
 
     -- Options Cog Button
@@ -3227,8 +3444,16 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         if f.StopCraftWatcher then
             f.StopCraftWatcher()
         end
+        if f.RankBar then
+            stopRankAnim(f.RankBar)
+            f.RankBar._ratio = nil
+            f.RankBar._rankShown = nil
+            f.RankBar._sweeping = false
+        end
         f.isCrafting = false
     end)
+
+    f.SideTabs = buildSideTabs(f)
 
     NS.botProfessionsFrame = f
     return f
@@ -3279,10 +3504,8 @@ local function UpdateRankBar(f, profName)
         and (rb._maxRank == maxRank)
         and (rb._genericFill == generic)
         and (rb._ratio ~= rankFrac)
-        and (not rb._snapNext)
         and f:IsShown()
 
-    rb._snapNext = nil
     rb._profKey = profName
     rb._botKey = f.botKey
     rb._maxRank = maxRank
@@ -3322,15 +3545,11 @@ end
 
 -- ── Render Frame ─────────────────────────────────────────────────────────
 NS.CB_RenderProfessions = function(f, profName)
-    if not f then return end
-    profName = profName or f.currentProf or "Engineering"
+    if not f or not profName then return end
     local prof = GetProfConfig(profName)
     if not prof then return end
     profName = prof.title or profName
     if f.currentProf ~= profName then
-        if f.RankBar then
-            f.RankBar._snapNext = true
-        end
         f.selectedRecipe = nil
         ResetFilters(f)
     end
@@ -3338,6 +3557,7 @@ NS.CB_RenderProfessions = function(f, profName)
 
     local entry = CleanBot_PartyBots and f.botKey and CleanBot_PartyBots[f.botKey]
     UpdateRankBar(f, profName)
+    UpdateSideTabs(f)
     local skillId = f.currentSkillId
 
     -- Window title: "Profession (BotName)" (ej: "Engineering (Pepe)")
@@ -3431,9 +3651,10 @@ NS.CB_OnProfessionsUpdated = function(key)
                     end
                 end
             end
-            local targetProf = currentValid and f.currentProf or (entry.professions[1].key or entry.professions[1].name)
+            local targetProf = currentValid and f.currentProf or GetFirstValidProf(entry)
             if currentValid and f.currentProf then
                 UpdateRankBar(f, targetProf)
+                UpdateSideTabs(f)
             else
                 NS.CB_RenderProfessions(f, targetProf)
             end
@@ -3473,16 +3694,19 @@ NS.CB_ToggleProfessions = function(key, botName, anchor)
     local f = NS.CB_GetProfessionsFrame(key, botName)
     if not f then return end
 
-    if f:IsShown() and f.botKey == key then
+    local isDifferentBot = (f.botKey ~= key)
+    if f:IsShown() and not isDifferentBot then
         f:Hide()
         return
     end
 
-    if (f.botKey ~= key or not f:IsShown()) and f.RankBar then
-        f.RankBar._snapNext = true
-    end
-    if f.botKey ~= key then
+    if isDifferentBot then
         f.selectedRecipe = nil
+        f.currentProf    = nil
+        f.rawRecipes     = nil
+        f.recipeTree     = {}
+        RefreshRecipeList(f)
+        SelectRecipe(f, nil)
     end
     f.botKey  = key
     f.botName = botName or key
@@ -3508,24 +3732,39 @@ NS.CB_ToggleProfessions = function(key, botName, anchor)
         NS.CB_FetchInventory(key, botName)
     end
 
-    local targetProf = f.currentProf
-    if entry and entry.professions and #entry.professions > 0 then
-        local found = false
-        if targetProf then
+    local targetProf
+    if isDifferentBot or not f.currentProf then
+        targetProf = GetFirstValidProf(entry)
+    else
+        targetProf = f.currentProf
+        if entry and entry.professions and #entry.professions > 0 then
+            local found = false
             for _, p in ipairs(entry.professions) do
                 if p.key == targetProf or p.name == targetProf then
                     found = true
                     break
                 end
             end
-        end
-        if not found then
-            targetProf = entry.professions[1].key or entry.professions[1].name
+            if not found then
+                targetProf = GetFirstValidProf(entry)
+            end
+        else
+            targetProf = nil
         end
     end
 
     f:Show()
-    NS.CB_RenderProfessions(f, targetProf)
+    if targetProf then
+        NS.CB_RenderProfessions(f, targetProf)
+    else
+        UpdateSideTabs(f)
+        if f.title then
+            local botClass = (entry and entry.class)
+            local c = botClass and RAID_CLASS_COLORS and RAID_CLASS_COLORS[botClass]
+            local formattedBot = c and string.format("|cff%02x%02x%02x%s|r", c.r * 255, c.g * 255, c.b * 255, botName or key) or (botName or key)
+            f.title:SetText(string.format("%s (%s)", _G.TRADE_SKILLS or "Professions", formattedBot))
+        end
+    end
 end
 
 -- ── Button Factory for Equip Panel ────────────────────────────────────────
