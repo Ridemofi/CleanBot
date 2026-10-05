@@ -1145,6 +1145,8 @@ describe("CB_ToggleProfessions background inventory sync", function()
             GetPoint = function() return "CENTER" end,
             ClearAllPoints = function() end,
             SetPoint = function() end,
+            GetFrameStrata = function() return "MEDIUM" end,
+            GetFrameLevel = function() return 1 end,
         }
 
         NS.CB_GetProfessionsFrame = function(k, n)
@@ -1199,6 +1201,247 @@ describe("CB_ToggleProfessions background inventory sync", function()
     end)
 
     restore()
+end)
+
+describe("CB_ToggleProfessions target selection and reset (d2155b7)", function()
+    local origFetchInv = NS.CB_FetchInventory
+    local origFetchProf = NS.CB_FetchProfessions
+    local origGetFrame = NS.CB_GetProfessionsFrame
+    local origRenderProf = NS.CB_RenderProfessions
+    local dummyFrame
+    local rendered
+    local fetchProfCalls
+
+    local function restore()
+        NS.CB_FetchInventory = origFetchInv
+        NS.CB_FetchProfessions = origFetchProf
+        NS.CB_GetProfessionsFrame = origGetFrame
+        NS.CB_RenderProfessions = origRenderProf
+    end
+
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = {
+                name = "Artemis",
+                professions = {
+                    { key = "engineering", name = "Engineering" },
+                    { key = "mining", name = "Mining" },
+                },
+                inventory = { items = { { itemId = 5956, name = "Blacksmith Hammer" } } },
+                inventoryAt = GetTime(),
+            },
+        }
+        rendered = nil
+        fetchProfCalls = 0
+        dummyFrame = {
+            botKey = nil,
+            botName = nil,
+            currentProf = nil,
+            selectedRecipe = nil,
+            rawRecipes = nil,
+            recipeTree = {},
+            IsShown = function() return false end,
+            Show = function() end,
+            Hide = function() end,
+            GetPoint = function() return "CENTER" end,
+            ClearAllPoints = function() end,
+            SetPoint = function() end,
+            GetFrameStrata = function() return "MEDIUM" end,
+            GetFrameLevel = function() return 1 end,
+        }
+        NS.CB_GetProfessionsFrame = function(k, n) return dummyFrame end
+        NS.CB_FetchProfessions = function() fetchProfCalls = fetchProfCalls + 1 end
+        NS.CB_FetchInventory = function() end
+        NS.CB_RenderProfessions = function(f, prof) rendered = prof end
+    end)
+
+    it("fetches professions from server on open", function()
+        dummyFrame.botKey = "other"
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals(1, fetchProfCalls)
+    end)
+
+    it("resets state on bot switch and renders first valid prof", function()
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = "Mining"
+        dummyFrame.selectedRecipe = { name = "Old" }
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.is_nil(dummyFrame.selectedRecipe)
+        assert.equals("artemis", dummyFrame.botKey)
+        assert.equals("Engineering", rendered)
+    end)
+
+    it("keeps current prof when same bot still has it", function()
+        dummyFrame.botKey = "artemis"
+        dummyFrame.currentProf = "Mining"
+        dummyFrame.selectedRecipe = { name = "Keep" }
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Mining", rendered)
+        assert.is_not_nil(dummyFrame.selectedRecipe)
+    end)
+
+    it("falls back to first valid when current prof is stale", function()
+        dummyFrame.botKey = "artemis"
+        dummyFrame.currentProf = "Tailoring"
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Engineering", rendered)
+    end)
+
+    it("goes through side tabs without error when bot has no professions", function()
+        CleanBot_PartyBots.artemis.professions = nil
+        dummyFrame.botKey = "other"
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.is_nil(rendered)
+    end)
+
+    it("respects primary order regardless of input order", function()
+        CleanBot_PartyBots.artemis.professions = {
+            { key = "mining", name = "Mining" },
+            { key = "engineering", name = "Engineering" },
+        }
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Engineering", rendered)
+    end)
+
+    it("prefers primary over secondary", function()
+        CleanBot_PartyBots.artemis.professions = {
+            { key = "cooking", name = "Cooking" },
+            { key = "alchemy", name = "Alchemy" },
+        }
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Alchemy", rendered)
+    end)
+
+    it("falls back to secondary when alone", function()
+        CleanBot_PartyBots.artemis.professions = {
+            { key = "cooking", name = "Cooking" },
+        }
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Cooking", rendered)
+    end)
+
+    it("renders nothing when only Herbalism without side-tab icon", function()
+        CleanBot_PartyBots.artemis.professions = {
+            { key = "herbalism", name = "Herbalism" },
+        }
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.is_nil(rendered)
+    end)
+
+    it("picks Cooking over Herbalism without icon", function()
+        CleanBot_PartyBots.artemis.professions = {
+            { key = "herbalism", name = "Herbalism" },
+            { key = "cooking", name = "Cooking" },
+        }
+        dummyFrame.botKey = "other"
+        dummyFrame.currentProf = nil
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Cooking", rendered)
+    end)
+
+    it("sets empty-state title with bot name when no professions", function()
+        CleanBot_PartyBots.artemis.professions = nil
+        local titleText = nil
+        dummyFrame.title = { SetText = function(self, t) titleText = t end }
+        dummyFrame.botKey = "other"
+        NS.CB_ToggleProfessions("artemis", "Artemis")
+        restore()
+        assert.equals("Professions (Artemis)", titleText)
+    end)
+
+    restore()
+end)
+
+describe("CB_RenderProfessions nil guard (d2155b7)", function()
+    it("ignores nil frame or profName without error", function()
+        local dummy = {
+            IsShown = function() return false end,
+            GetFrameStrata = function() return "MEDIUM" end,
+            GetFrameLevel = function() return 1 end,
+        }
+        assert.is_nil(NS.CB_RenderProfessions(nil, nil))
+        assert.is_nil(NS.CB_RenderProfessions(dummy, nil))
+        assert.is_nil(NS.CB_RenderProfessions(nil, "Engineering"))
+    end)
+end)
+
+describe("CB_OnProfessionsUpdated reselection (d2155b7)", function()
+    local origFrame = NS.botProfessionsFrame
+    local origRenderProf = NS.CB_RenderProfessions
+    local dummyFrame
+    local rendered
+
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = {
+            artemis = {
+                name = "Artemis",
+                professions = {
+                    { key = "engineering", name = "Engineering" },
+                    { key = "mining", name = "Mining" },
+                },
+            },
+        }
+        rendered = nil
+        dummyFrame = {
+            botKey = "artemis",
+            botName = "Artemis",
+            currentProf = nil,
+            IsShown = function() return true end,
+            Show = function() end,
+            Hide = function() end,
+            GetFrameStrata = function() return "MEDIUM" end,
+            GetFrameLevel = function() return 1 end,
+        }
+        NS.botProfessionsFrame = dummyFrame
+        NS.CB_RenderProfessions = function(f, prof) rendered = prof end
+    end)
+
+    it("renders first valid when current prof is stale", function()
+        dummyFrame.currentProf = "Tailoring"
+        NS.CB_OnProfessionsUpdated("artemis")
+        NS.botProfessionsFrame = origFrame
+        NS.CB_RenderProfessions = origRenderProf
+        assert.equals("Engineering", rendered)
+    end)
+
+    it("keeps frame without render when current prof still valid", function()
+        dummyFrame.currentProf = "Mining"
+        NS.CB_OnProfessionsUpdated("artemis")
+        NS.botProfessionsFrame = origFrame
+        NS.CB_RenderProfessions = origRenderProf
+        assert.is_nil(rendered)
+    end)
+
+    it("ignores updates for other bots", function()
+        dummyFrame.currentProf = "Tailoring"
+        NS.CB_OnProfessionsUpdated("other")
+        NS.botProfessionsFrame = origFrame
+        NS.CB_RenderProfessions = origRenderProf
+        assert.is_nil(rendered)
+    end)
+
+    NS.botProfessionsFrame = origFrame
+    NS.CB_RenderProfessions = origRenderProf
 end)
 
 describe("INV_END and INV_EXACT_END record inventoryAt timestamp", function()
