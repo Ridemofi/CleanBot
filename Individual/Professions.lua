@@ -70,6 +70,14 @@ local ROW_H_CAT        = 24
 local ROW_H_RECIPE     = 20
 local VISIBLE_ROWS     = 25
 
+-- Wide and compact crafting layouts.
+local LAYOUTS = {
+    max = { w = FRAME_W, h = FRAME_H, list = RECIPELIST_W, rank = RANKBAR_TL },
+    min = { w = 673, h = 594, list = RECIPELIST_W, rank = { 110, -40 } },
+}
+local BOOK = P .. "Book\\"
+local ApplyLayout, SetCompact
+
 -- ── Atlas Texture Coordinates ─────────────────────────────────────────────
 local ATLAS = {
     -- Metal Corners (2406979)
@@ -162,6 +170,13 @@ local ATLAS = {
     closePressed    = { file = CLOSE_SHEET,   left = 0.152344, right = 0.292969, top = 0.632812, bottom = 0.929688 },
     closeHighlight  = { file = CLOSE_SHEET,   left = 0.449219, right = 0.589844, top = 0.007812, bottom = 0.304688 },
 
+    ["redbutton-expand-2x"] = { file = CLOSE_SHEET, left = 0.300781, right = 0.441406, top = 0.007812, bottom = 0.304688 },
+    ["redbutton-expand-pressed-2x"] = { file = CLOSE_SHEET, left = 0.300781, right = 0.441406, top = 0.632812, bottom = 0.929688 },
+    ["redbutton-condense-2x"] = { file = CLOSE_SHEET, left = 0.003906, right = 0.144531, top = 0.007812, bottom = 0.304688 },
+    ["redbutton-condense-pressed-2x"] = { file = CLOSE_SHEET, left = 0.003906, right = 0.144531, top = 0.632812, bottom = 0.929688 },
+    ["redbutton-highlight-2x"] = { file = CLOSE_SHEET, left = 0.449219, right = 0.589844, top = 0.007812, bottom = 0.304688 },
+    compactBody = { file = BOOK .. "professionoverviewbackgroundc60.blp", left = 0.000977, right = 0.650391, top = 0.000977, bottom = 0.557617 },
+
     -- Side tabs
     sideTab         = { file = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\commonsidetabc60.blp", left = 0.007812, right = 0.4375,   top = 0.007812, bottom = 0.476562 },
     sideTabHover    = { file = "Interface\\AddOns\\CleanBot\\Textures\\Professions\\tabs\\commonsidetabc60.blp", left = 0.007812, right = 0.4375,   top = 0.492188, bottom = 0.960938 },
@@ -172,6 +187,145 @@ local function ApplyAtlas(tex, info)
     if not (tex and info) then return end
     tex:SetTexture(info.file)
     tex:SetTexCoord(info.left, info.right, info.top, info.bottom)
+    return true
+end
+
+for _, key in ipairs({ "alchemy", "blacksmithing", "enchanting", "engineering", "leatherworking",
+                      "mining", "tailoring", "cooking", "firstaid", "jewelcrafting", "inscription" }) do
+    ATLAS["profession-background-card-" .. key] = {
+        file = BOOK .. "craftcard" .. key .. ".blp",
+        left = 0.001953, right = 0.705078, top = 0.001953, bottom = 0.947266,
+    }
+end
+
+-- Maximize/minimize button; the owner supplies the live state.
+local function BuildMaxMinButton(parent, opts)
+    if not parent then return nil end
+    if parent._cbMaxMin then return parent._cbMaxMin end
+    opts = opts or {}
+    local b = CreateFrame("Button", opts.name, parent)
+    local size = opts.size or 24
+    b:SetSize(size, size)
+    if opts.anchorTo then
+        b:SetPoint("RIGHT", opts.anchorTo, "LEFT", -1, 0)
+    else
+        b:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -(size + 3), 0)
+    end
+    local base = (parent.GetFrameLevel and parent:GetFrameLevel()) or 1
+    b:SetFrameLevel(opts.frameLevel or (base + 21))
+    -- Seed state textures from a path, then crop via the texture handles.
+    b:SetNormalTexture(CLOSE_SHEET)
+    b:SetPushedTexture(CLOSE_SHEET)
+    b:SetHighlightTexture(CLOSE_SHEET)
+    local nt, pt, ht = b:GetNormalTexture(), b:GetPushedTexture(), b:GetHighlightTexture()
+    for _, t in ipairs({ nt, pt, ht }) do
+        if t and t.SetAllPoints then t:SetAllPoints(b) end
+    end
+    if ht then
+        ApplyAtlas(ht, ATLAS["redbutton-highlight-2x"])
+        if ht.SetBlendMode then ht:SetBlendMode("ADD") end
+    end
+    b._maximized = opts.maximized and true or false
+    local function syncIcon()
+        local glyph = b:IsMaximized() and "redbutton-condense" or "redbutton-expand"
+        if nt and ApplyAtlas(nt, ATLAS[glyph .. "-2x"]) then b._cbGlyph = glyph end
+        if pt then ApplyAtlas(pt, ATLAS[glyph .. "-pressed-2x"]) end
+    end
+    function b:SetMaximizedLook() b._maximized = true; syncIcon() end
+    function b:SetMinimizedLook() b._maximized = false; syncIcon() end
+    b._stateFunc = opts.stateFunc
+    function b:SetStateFunc(fn) b._stateFunc = fn; syncIcon() end
+    function b:IsMaximized()
+        if b._stateFunc then
+            local ok, v = pcall(b._stateFunc)
+            if ok and v ~= nil then return v and true or false end
+        end
+        return b._maximized
+    end
+    function b:SetOnMaximizedCallback(fn) b._onMax = fn end
+    function b:SetOnMinimizedCallback(fn) b._onMin = fn end
+    b._onMax, b._onMin = opts.onMaximize, opts.onMinimize
+    function b:SetStateSilently(maximized)
+        b._maximized = maximized and true or false
+        syncIcon()
+    end
+    b:SetScript("OnClick", function(self)
+        local goingMax = not self:IsMaximized()
+        self._maximized = goingMax
+        local fn = goingMax and self._onMax or self._onMin
+        if fn then
+            local ok, err = pcall(fn, goingMax)
+            if not ok and NS.CB_Print then NS.CB_Print("MAXMIN: " .. tostring(err)) end
+        end
+        syncIcon()
+    end)
+    b:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        local text = self:IsMaximized() and (opts.tooltipMin or MINIMIZE or "Minimize")
+                                         or (opts.tooltipMax or MAXIMIZE or "Maximize")
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText(text)
+        GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    syncIcon()
+    parent._cbMaxMin = b
+    return b
+end
+
+-- Compact geometry and text fitting helpers.
+local function isCompact(f)
+    return f.opts and f.opts.compact and true or false
+end
+
+local function compactSchematicSize()
+    local lay = LAYOUTS.min
+    return lay.w - 5 - lay.list - 2 - 6, 484
+end
+
+local function reagentGeom(f)
+    if isCompact(f) then return compactSchematicSize() - 40, 42 end
+    return SCHEMATIC_W - 250 - 70, 48
+end
+
+local function OutputNameWidth(f)
+    if isCompact(f) then return compactSchematicSize() - 89 - 30 end
+    return SCHEMATIC_W - 250 - 16 - 89 - 30
+end
+
+local function FitText(fs, text, maxW, base, minSize)
+    if not fs then return end
+    fs:SetText(text or "")
+    local path, _, flags = fs:GetFont()
+    maxW = maxW or fs:GetWidth()
+    if not path or not maxW or maxW <= 0 then return end
+    for size = base, minSize, -1 do
+        fs:SetFont(path, size, flags)
+        if (fs:GetStringWidth() or 0) <= maxW then
+            fs._cbFitWrapped = nil
+            return size
+        end
+    end
+    fs:SetWidth(maxW)
+    if fs.SetWordWrap then fs:SetWordWrap(true) end
+    if fs.SetNonSpaceWrap then fs:SetNonSpaceWrap(true) end
+    fs._cbFitWrapped = true
+    return minSize
+end
+
+local function getVisibleRowCount(rl)
+    if not (rl and rl.scrollContent) then return VISIBLE_ROWS end
+    local h = rl.scrollContent:GetHeight() or 0
+    if h < ROW_H_RECIPE then return rl._lastVisibleRows or VISIBLE_ROWS end
+    local n = math.floor(h / ROW_H_RECIPE)
+    if n < 1 then n = 1 end
+    rl._lastVisibleRows = n
+    return n
+end
+
+local function ensureRowPool(rl, count)
+    if not rl.CreateRow then return end
+    for i = #rl.rows + 1, count do rl.CreateRow(i) end
 end
 
 -- ── Inset Frame Bevelled Border Helper (InsetFrameTemplate) ──────────────
@@ -1160,7 +1314,7 @@ local function SelectRecipe(f, recipe)
         local dc = DIFF_COLORS[recipe.difficulty] or DIFF_COLORS.trivial
         sf.OutputName:SetTextColor(dc.r, dc.g, dc.b)
     end
-    sf.OutputName:SetText(recipe.name)
+    FitText(sf.OutputName, recipe.name, OutputNameWidth(f), 20, 12)
 
     sf.FavoriteBtn:Hide()
     sf.FavoriteBtn.tex:SetTexture(AH_CHROME)
@@ -1195,7 +1349,7 @@ local function SelectRecipe(f, recipe)
             slot.count:SetText(string.format("%d/%d", data.available, data.count))
             slot.count:SetTextColor(1, 1, 1)
 
-            slot.name:SetText(data.name)
+            FitText(slot.name, data.name, nil, 12, 8)
             if hasEnough then
                 slot.name:SetTextColor(1, 1, 1)
             else
@@ -1226,7 +1380,7 @@ local function SelectRecipe(f, recipe)
     else
         desc = GetRecipeDescription(recipe)
     end
-    if desc and desc ~= "" then
+    if not isCompact(f) and desc and desc ~= "" then
         sf.DetailsText:SetText(desc)
         sf.DetailsIcon:SetTexture(recipe.icon)
         local textH = sf.DetailsText:GetStringHeight() or 80
@@ -1275,7 +1429,7 @@ end
 
 -- ── Minimal Scrollbar Visual Sync Helper ─────────────────────────────────
 local function SyncMinimalScrollbar(rl, total)
-    local maxOffset = math.max(0, total - VISIBLE_ROWS)
+    local maxOffset = math.max(0, total - getVisibleRowCount(rl))
     local offset = FauxScrollFrame_GetOffset(rl.scrollFrame) or 0
     if offset > maxOffset then offset = maxOffset end
 
@@ -1361,14 +1515,16 @@ function RefreshRecipeList(f)
 
     local total = #flat
     rl.totalEntries = total
-    local maxOffset = math.max(0, total - VISIBLE_ROWS)
+    local visibleRows = getVisibleRowCount(rl)
+    ensureRowPool(rl, visibleRows)
+    local maxOffset = math.max(0, total - visibleRows)
     local offset = FauxScrollFrame_GetOffset(rl.scrollFrame) or 0
     if offset > maxOffset then
         offset = maxOffset
         FauxScrollFrame_SetOffset(rl.scrollFrame, offset)
     end
 
-    for i = 1, VISIBLE_ROWS do
+    for i = 1, visibleRows do
         local row = rl.rows[i]
         local idx = offset + i
         local item = flat[idx]
@@ -1464,6 +1620,8 @@ function RefreshRecipeList(f)
         end
     end
 
+    for i = visibleRows + 1, #(rl.rows or {}) do rl.rows[i]:Hide() end
+
     if rl.filterReset then
         local hasFilterToggles = (not filt.showLearned) or filt.makeable or filt.skillUp
         if hasFilterToggles and filterText == "" then
@@ -1473,19 +1631,20 @@ function RefreshRecipeList(f)
         end
     end
 
-    FauxScrollFrame_Update(rl.scrollFrame, total, VISIBLE_ROWS, ROW_H_RECIPE)
+    FauxScrollFrame_Update(rl.scrollFrame, total, visibleRows, ROW_H_RECIPE)
     SyncMinimalScrollbar(rl, total)
 end
 
 -- ── Options Menu Settings Persistence ───────────────────────────────────
 local function loadOpts(f)
-    f.opts = f.opts or { hideListTooltips = false, colorByDifficulty = false, genericBar = false }
+    f.opts = f.opts or { hideListTooltips = false, colorByDifficulty = false, genericBar = false, compact = false }
     local root = _G.CleanBot_SavedVars
     local o = root and root.professionOpts
     if type(o) == "table" then
         if o.hideListTooltips  ~= nil then f.opts.hideListTooltips  = o.hideListTooltips  and true or false end
         if o.colorByDifficulty ~= nil then f.opts.colorByDifficulty = o.colorByDifficulty and true or false end
         if o.genericBar        ~= nil then f.opts.genericBar        = o.genericBar        and true or false end
+        if o.compact           ~= nil then f.opts.compact           = o.compact           and true or false end
     end
 end
 
@@ -1499,6 +1658,103 @@ local function saveOpts(f)
     o.hideListTooltips  = f.opts.hideListTooltips  and true or false
     o.colorByDifficulty = f.opts.colorByDifficulty and true or false
     o.genericBar        = f.opts.genericBar        and true or false
+    o.compact           = f.opts.compact           and true or false
+end
+
+-- Compact card and wide parchment backgrounds.
+local function ApplySchematicBackground(f)
+    local sf = f.SchematicForm
+    if not (sf and sf.bg) then return end
+    local prof = f.currentProf and GetProfConfig(f.currentProf)
+    local key = prof and prof.title:lower():gsub(" ", "")
+    local card = key and ATLAS["profession-background-card-" .. key]
+    if isCompact(f) and card and ApplyAtlas(sf.bg, card) then return end
+    sf.bg:SetTexture(prof and prof.bg or P .. "4659666-professions-recipe-background.blp")
+    local l, r, t, b = 0.000977, 0.660156, 0.000977, 0.536133
+    if isCompact(f) then
+        local w, h = compactSchematicSize()
+        local frac = math.min(1, (w / h) / (675 / 548))
+        l = r - (r - l) * frac
+    end
+    sf.bg:SetTexCoord(l, r, t, b)
+end
+
+local function LayoutSchematic(f)
+    local sf = f.SchematicForm
+    if not sf then return end
+    local compact = isCompact(f)
+    local colW, rowH = reagentGeom(f)
+    sf:ClearAllPoints()
+    sf:SetPoint("TOPLEFT", f.RecipeList, "TOPRIGHT", 2, 0)
+    if compact then
+        local w, h = compactSchematicSize()
+        sf:SetPoint("BOTTOMRIGHT", f.RecipeList, "TOPRIGHT", 2 + w, -h)
+    else
+        sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -6, 5)
+    end
+    if sf.ReagentContainer then sf.ReagentContainer:SetWidth(colW) end
+    if sf.RequiresText then sf.RequiresText:SetWidth(colW - (compact and 70 or 30)) end
+    for i, slot in ipairs(sf.reagentSlots or {}) do
+        slot:SetWidth(colW)
+        slot:ClearAllPoints()
+        slot:SetPoint("TOPLEFT", sf.ReagentContainer, "TOPLEFT", 0, -(i - 1) * rowH)
+    end
+    if sf.DetailsPanel and compact then sf.DetailsPanel:Hide() end
+    local ca, minus = f.CreateAllButton, f.CreateMinusButton
+    if ca and minus then
+        ca:SetWidth(compact and 90 or 125)
+        ca:ClearAllPoints()
+        ca:SetPoint("RIGHT", minus, "LEFT", compact and -8 or -30, 0)
+    end
+    ApplySchematicBackground(f)
+    if f.selectedRecipe then SelectRecipe(f, f.selectedRecipe) end
+    -- Quantity controls stay hidden in both layouts.
+    for _, control in ipairs({ f.qtyBox, f.CreateMinusButton, f.CreatePlusButton, f.CreateAllButton }) do
+        control:Hide()
+    end
+end
+
+ApplyLayout = function(f)
+    if not f then return end
+    local lay = isCompact(f) and LAYOUTS.min or LAYOUTS.max
+    f:SetSize(lay.w, lay.h)
+    if f.RecipeList then f.RecipeList:SetWidth(lay.list) end
+    if f.RankBar then
+        f.RankBar:ClearAllPoints()
+        f.RankBar:SetPoint("TOPLEFT", f, "TOPLEFT", lay.rank[1], lay.rank[2])
+    end
+    if f.bodyBg then
+        local body = f.bodyBg
+        if isCompact(f) and ApplyAtlas(body, ATLAS.compactBody) then
+            body:SetHorizTile(false); body:SetVertTile(false)
+            body:SetPoint("TOPLEFT", f, "TOPLEFT", 2, -21)
+            body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -2, 2)
+        else
+            body:SetTexture(ROCK_BODY, "REPEAT", "REPEAT")
+            body:SetTexCoord(0, 1, 0, 1)
+            body:SetHorizTile(true); body:SetVertTile(true)
+            body:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -21)
+            body:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+        end
+    end
+    if f.topStreaks then
+        if isCompact(f) then f.topStreaks:Hide() else f.topStreaks:Show() end
+    end
+    LayoutSchematic(f)
+    if f.RecipeList and f.RecipeList.CreateRow then RefreshRecipeList(f) end
+end
+
+SetCompact = function(f, on)
+    -- Retain the top-left corner on resize; the frame initially opens centered.
+    local left, top = f:GetLeft(), f:GetTop()
+    if left and top then
+        f:ClearAllPoints()
+        f:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+    end
+    f.opts.compact = on and true or false
+    saveOpts(f)
+    ApplyLayout(f)
+    if f.MaxMinButton then f.MaxMinButton:SetStateSilently(not f.opts.compact) end
 end
 
 -- ── Options Menu Popup ────────────────────────────────────────────────────
@@ -1587,6 +1843,30 @@ local function buildCogMenu(f, cog)
     end)
     f.CogMenu = menu
     return menu
+end
+
+local function ResetProfessionSelection(f)
+    f.selectedRecipe = nil
+    f.currentProf    = nil
+    f.rawRecipes     = nil
+    f.recipeTree     = {}
+    RefreshRecipeList(f)
+    SelectRecipe(f, nil)
+end
+
+local function FetchProfessionData(key, botName)
+    if NS.CB_FetchProfessions then
+        NS.CB_FetchProfessions(key, botName)
+    end
+    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
+    local hasItems = entry and entry.inventory and type(entry.inventory.items) == "table"
+    local ttl = NS.INVENTORY_TTL or 30
+    local isFresh = entry and entry.inventoryAt and (GetTime() - entry.inventoryAt) < ttl
+    local inFlight = entry and entry.awaitingInventory
+    if (not hasItems or not isFresh) and not inFlight and NS.CB_FetchInventory then
+        NS.CB_FetchInventory(key, botName)
+    end
+    return entry
 end
 
 -- ── Bot Selector Dropdown Menu (Dropdown Triggered from Header) ───────────
@@ -1695,24 +1975,9 @@ local function buildProfDropdown(f, headerBtn)
                     if bKey ~= f.botKey then
                         f.botKey         = bKey
                         f.botName        = bName
-                        f.selectedRecipe = nil
-                        f.currentProf    = nil
-                        f.rawRecipes     = nil
-                        f.recipeTree     = {}
-                        RefreshRecipeList(f)
-                        SelectRecipe(f, nil)
+                        ResetProfessionSelection(f)
 
-                        if NS.CB_FetchProfessions then
-                            NS.CB_FetchProfessions(bKey, bName)
-                        end
-                        local entry = CleanBot_PartyBots and CleanBot_PartyBots[bKey]
-                        local hasItems = entry and entry.inventory and type(entry.inventory.items) == "table"
-                        local ttl = NS.INVENTORY_TTL or 30
-                        local isFresh = entry and entry.inventoryAt and (GetTime() - entry.inventoryAt) < ttl
-                        local inFlight = entry and entry.awaitingInventory
-                        if (not hasItems or not isFresh) and not inFlight and NS.CB_FetchInventory then
-                            NS.CB_FetchInventory(bKey, bName)
-                        end
+                        local entry = FetchProfessionData(bKey, bName)
 
                         local targetProf = GetFirstValidProf(entry)
                         if targetProf and NS.CB_RenderProfessions then
@@ -1950,6 +2215,8 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     local f = NS.botProfessionsFrame
     if f then
         loadOpts(f)
+        ApplyLayout(f)
+        if f.MaxMinButton then f.MaxMinButton:SetStateSilently(not f.opts.compact) end
         return f
     end
 
@@ -2130,6 +2397,14 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         f:Hide()
     end)
     f.closeBtn = closeBtn
+    f.MaxMinButton = BuildMaxMinButton(f, {
+        name = "CleanBotProfessionsMaxMinButton",
+        anchorTo = closeBtn,
+        frameLevel = closeBtn:GetFrameLevel(),
+        stateFunc = function() return not f.opts.compact end,
+        onMaximize = function() SetCompact(f, false) end,
+        onMinimize = function() SetCompact(f, true) end,
+    })
 
     -- ── 7. Rank Bar (Skill Progress) ──────────────────────────────────────
     local rb = CreateFrame("Frame", nil, f)
@@ -2332,7 +2607,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     end)
     local function onWheel(self, delta)
         local total = rl.totalEntries or 0
-        local maxOffset = math.max(0, total - VISIBLE_ROWS)
+        local maxOffset = math.max(0, total - getVisibleRowCount(rl))
         local current = FauxScrollFrame_GetOffset(sfScroll) or 0
         local nextVal = current - delta
         if nextVal < 0 then nextVal = 0 end
@@ -2401,7 +2676,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     local dH = downArrow:CreateTexture(nil, "HIGHLIGHT"); dH:SetAllPoints(); ApplyAtlas(dH, ATLAS.sbArrowDownOver); dH:SetBlendMode("ADD"); downArrow:SetHighlightTexture(dH)
     downArrow:SetScript("OnClick", function()
         local total = rl.totalEntries or 0
-        local maxOffset = math.max(0, total - VISIBLE_ROWS)
+        local maxOffset = math.max(0, total - getVisibleRowCount(rl))
         local current = FauxScrollFrame_GetOffset(sfScroll) or 0
         if current < maxOffset then
             FauxScrollFrame_SetOffset(sfScroll, current + 1)
@@ -2450,7 +2725,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
 
         local total = rl.totalEntries or 0
-        local maxOffset = math.max(0, total - VISIBLE_ROWS)
+        local maxOffset = math.max(0, total - getVisibleRowCount(rl))
         local newOffset = math.floor(frac * maxOffset + 0.5)
 
         thumb:ClearAllPoints()
@@ -2506,7 +2781,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     -- Row Pool
     rl.rows = {}
-    for i = 1, VISIBLE_ROWS do
+    rl.CreateRow = function(i)
         local row = CreateFrame("Button", nil, scrollContent)
         row:SetHeight(ROW_H_RECIPE)
 
@@ -2604,6 +2879,10 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         row.profFrame = f
         rl.rows[i] = row
     end
+    ensureRowPool(rl, VISIBLE_ROWS)
+    scrollContent:SetScript("OnSizeChanged", function()
+        if f._subBuilt and f:IsShown() then RefreshRecipeList(f) end
+    end)
 
     -- ── 9. Right Panel (SchematicForm) ────────────────────────────────────
     local sf = CreateFrame("Frame", "CleanBotProfessionsSchematic", f)
@@ -2614,7 +2893,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     -- Blueprint background with EXACT UV crop to fill the 655x553 pane!
     local sfBg = sf:CreateTexture(nil, "BACKGROUND")
-    sfBg:SetTexture(P .. "4722478-professions-recipe-background-engineering.blp")
+    sfBg:SetTexture(P .. "4659666-professions-recipe-background.blp")
     sfBg:SetTexCoord(0.000977, 0.660156, 0.000977, 0.536133)
     sfBg:SetAllPoints(sf)
     sf.bg = sfBg
@@ -2663,7 +2942,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     -- Requires Line
     local reqText = sf:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    reqText:SetPoint("TOPLEFT", outName, "BOTTOMLEFT", 0, -4)
+    reqText:SetPoint("TOPLEFT", outName, "BOTTOMLEFT", 0, -6)
     reqText:SetJustifyH("LEFT")
     sf.RequiresText = reqText
 
@@ -2676,16 +2955,21 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     -- Reagents Header
     local rh = sf:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    rh:SetPoint("TOPLEFT", outIcon, "BOTTOMLEFT", 0, -38)
+    rh:SetPoint("TOPLEFT", outIcon, "BOTTOMLEFT", 0, -48)
     rh:SetText("Reagents")
     sf.ReagentHeader = rh
+
+    local reagentContainer = CreateFrame("Frame", nil, sf)
+    reagentContainer:SetPoint("TOPLEFT", rh, "BOTTOMLEFT", 0, -10)
+    reagentContainer:SetSize(SCHEMATIC_W - 250 - 70, 240)
+    sf.ReagentContainer = reagentContainer
 
     -- Reagent Slots (48px tall rows)
     sf.reagentSlots = {}
     for i = 1, 8 do
         local rslot = CreateFrame("Button", nil, sf)
         rslot:SetSize(320, 48)
-        rslot:SetPoint("TOPLEFT", rh, "BOTTOMLEFT", 0, -8 - ((i - 1) * 48))
+        rslot:SetPoint("TOPLEFT", reagentContainer, "TOPLEFT", 0, -(i - 1) * 48)
         rslot:EnableMouse(true)
         rslot:RegisterForClicks("LeftButtonUp")
 
@@ -2800,8 +3084,8 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     -- ── 11. Bottom Action Controls ──────────────────────────────────────────
     local createBtn = CreateFrame("Button", "CleanBotProfessionsCreateBtn", f, "UIPanelButtonTemplate")
-    createBtn:SetSize(110, 22)
-    createBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 16)
+    createBtn:SetSize(82, 22)
+    createBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -9, 16)
     createBtn:SetText("Create")
     createBtn:SetFrameLevel((sf:GetFrameLevel() or 1) + 20)
     SkinRedButton(createBtn)
@@ -2823,6 +3107,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     minusBtn:SetSize(20, 20)
     minusBtn:SetPoint("RIGHT", qtyBox, "LEFT", -8, 0)
     minusBtn:SetText("-")
+    f.CreateMinusButton = minusBtn
     minusBtn:SetFrameLevel((sf:GetFrameLevel() or 1) + 20)
     SkinRedButton(minusBtn)
     minusBtn:Hide()
@@ -2838,6 +3123,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
     plusBtn:SetSize(20, 20)
     plusBtn:SetPoint("LEFT", qtyBox, "RIGHT", 4, 0)
     plusBtn:SetText("+")
+    f.CreatePlusButton = plusBtn
     plusBtn:SetFrameLevel((sf:GetFrameLevel() or 1) + 20)
     SkinRedButton(plusBtn)
     plusBtn:Hide()
@@ -3455,7 +3741,9 @@ NS.CB_GetProfessionsFrame = function(key, botName)
 
     f.SideTabs = buildSideTabs(f)
 
+    f._subBuilt = true
     NS.botProfessionsFrame = f
+    ApplyLayout(f)
     return f
 end
 
@@ -3588,10 +3876,7 @@ NS.CB_RenderProfessions = function(f, profName)
     end
 
     -- Schematic background
-    if f.SchematicForm and f.SchematicForm.bg and prof.bg then
-        f.SchematicForm.bg:SetTexture(prof.bg)
-        f.SchematicForm.bg:SetTexCoord(0.000977, 0.660156, 0.000977, 0.536133)
-    end
+    ApplySchematicBackground(f)
 
     -- Query / Render recipes
     local cachedRecipes = nil
@@ -3701,12 +3986,7 @@ NS.CB_ToggleProfessions = function(key, botName, anchor)
     end
 
     if isDifferentBot then
-        f.selectedRecipe = nil
-        f.currentProf    = nil
-        f.rawRecipes     = nil
-        f.recipeTree     = {}
-        RefreshRecipeList(f)
-        SelectRecipe(f, nil)
+        ResetProfessionSelection(f)
     end
     f.botKey  = key
     f.botName = botName or key
@@ -3719,18 +3999,7 @@ NS.CB_ToggleProfessions = function(key, botName, anchor)
         f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
     end
 
-    if NS.CB_FetchProfessions then
-        NS.CB_FetchProfessions(key, botName)
-    end
-
-    local entry = CleanBot_PartyBots and CleanBot_PartyBots[key]
-    local hasItems = entry and entry.inventory and type(entry.inventory.items) == "table"
-    local ttl = NS.INVENTORY_TTL or 30
-    local isFresh = entry and entry.inventoryAt and (GetTime() - entry.inventoryAt) < ttl
-    local inFlight = entry and entry.awaitingInventory
-    if (not hasItems or not isFresh) and not inFlight and NS.CB_FetchInventory then
-        NS.CB_FetchInventory(key, botName)
-    end
+    local entry = FetchProfessionData(key, botName)
 
     local targetProf
     if isDifferentBot or not f.currentProf then
