@@ -345,6 +345,7 @@ NS.CB_StopDisenchantWatcher  = CB_StopDisenchantWatcher
 
 -- ── Inventory cell right-click context menu ──────────────────────────────
 local invMenu = CreateFrame("Frame", "CleanBotInvMenu", UIParent, "UIDropDownMenuTemplate")
+local CB_DoSell
 
 ---@param cell table   The inventory cell button the context menu opens from.
 ---@param key  string  Bot name-key the cell belongs to.
@@ -406,22 +407,26 @@ local function CB_ShowInvMenu(cell, key)
             UIDropDownMenu_AddButton(info)
         end
 
-        -- Trade / Sell apply to everything except quest items (which can't be traded
-        -- or vendored). Triggers are "t" and "s" — not "trade"/"sell" (see
-        -- docs/playerbot-commands.md, "Chat commands are TRIGGERS, not action names").
+        -- Quest items cannot be traded or sold. Trade uses chat trigger "t";
+        -- Sell uses bridge ITEM_SELL or chat trigger "s" when bridge is absent,
+        -- not "trade"/"sell" (see docs/playerbot-commands.md,
+        -- "Chat commands are TRIGGERS, not action names").
         if not isQuest then
-            local function addItemCmd(label, trigger, refetch)
-                info.text = label
-                info.func = function()
-                    local entry = CleanBot_PartyBots[key]
-                    if not entry then return end
-                    NS.CB_SendBotCommand(entry.name, trigger .. " " .. NS.CB_CleanItemLink(cell.itemLink))
-                    if refetch then NS.CB_ScheduleReconcile(key, entry.name) end
-                end
-                UIDropDownMenu_AddButton(info)
+            info.text = "Trade"
+            info.func = function()
+                local entry = CleanBot_PartyBots[key]
+                if not entry then return end
+                NS.CB_SendBotCommand(entry.name, "t " .. NS.CB_CleanItemLink(cell.itemLink))
             end
-            addItemCmd("Trade", "t", false)
-            addItemCmd("Sell",  "s", true)
+            UIDropDownMenu_AddButton(info)
+
+            info.text = "Sell"
+            info.func = function()
+                local entry = CleanBot_PartyBots[key]
+                if not entry or not cell.itemLink then return end
+                CB_DoSell(cell, key, entry)
+            end
+            UIDropDownMenu_AddButton(info)
 
             if NS.CB_IsItemDisenchantable and NS.CB_IsItemDisenchantable(key, cell.itemLink) then
                 info.text = "Disenchant"
@@ -543,7 +548,7 @@ KINDS.bank.menu      = CB_ShowBankMenu
 -- Uncommon-or-better items confirm first (bots have no vendor buyback). The popup
 -- registers lazily because NS.CB_RegisterConfirmPopup lives in ManageTab.lua, which
 -- loads after this file.
-local function CB_DoSell(cell, key, entry)
+CB_DoSell = function(cell, key, entry)
     local link = cell.itemLink
     if not link then return end
     local sent = false
