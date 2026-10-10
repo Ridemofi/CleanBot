@@ -443,6 +443,293 @@ describe("Loot strategy reply parsing", function()
     end)
 end)
 
+describe("Inventory visual swaps preserve exact item commands", function()
+    local originalVisuals = NS.CB_ApplyItemVisuals
+    local originalResetCursor = _G.ResetCursor
+    local globalNames = { "GetItemInfo", "GetItemIcon", "UIDropDownMenu_Initialize",
+        "UIDropDownMenu_CreateInfo", "UIDropDownMenu_AddButton", "ToggleDropDownMenu" }
+    local nsNames = { "CB_ClearQualityBorder", "CB_SetQualityBorder", "CB_SetRarityOverlay", "CB_AddWowheadMenuButton",
+        "botInventoryFrames", "botBankFrames" }
+    local originalGlobals, originalNS, menuActions = {}, {}, {}
+    for _, name in ipairs(globalNames) do originalGlobals[name] = _G[name] end
+    for _, name in ipairs(nsNames) do originalNS[name] = NS[name] end
+
+    -- Reach the actual private menu through the renderer, without adding production exports.
+    local function upvalue(fn, wanted)
+        for i = 1, math.huge do
+            local name, value = debug.getupvalue(fn, i)
+            if not name then error("Missing upvalue: " .. wanted) end
+            if name == wanted then return value end
+        end
+    end
+    local inventoryKind = upvalue(upvalue(NS.CB_RenderInventory, "CB_RenderGrid"), "KINDS").inventory
+    local originalFrames = inventoryKind.frames
+    local showMenu = inventoryKind.menu
+
+    local function region(value)
+        return {
+            value = value, shown = value ~= nil,
+            GetTexture = function(self) return self.value end,
+            SetTexture = function(self, v) self.value = v end,
+            GetText = function(self) return self.value end,
+            SetText = function(self, v) self.value = v end,
+            IsShown = function(self) return self.shown end,
+            Show = function(self) self.shown = true end,
+            Hide = function(self) self.shown = false end,
+            SetDesaturated = function() end,
+        }
+    end
+
+    local function cell(id, bag, slot, count)
+        return {
+            itemLink = id and itemLine(id, "Item"), itemId = id,
+            bag = bag, slot = slot, count = count,
+            icon = region(id), countText = region(count and count > 1 and tostring(count) or nil),
+        }
+    end
+
+    local function swap(source, target)
+        NS.dragging = { key = "bot", sourceCell = source, invDropCell = target }
+        NS.CB_StopDrag()
+    end
+
+    before_each(function()
+        NS.CB_StopDisenchantWatcher()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot", spellbookSeen = { [13262] = true } } }
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        Mock.party = 1
+        NS.CB_ApplyItemVisuals = function() end
+        NS.CB_ClearQualityBorder = function() end
+        NS.CB_SetQualityBorder = function() end
+        NS.CB_SetRarityOverlay = function() end
+        NS.CB_AddWowheadMenuButton = function() end
+        NS.botInventoryFrames, NS.botBankFrames = {}, {}
+        inventoryKind.frames = NS.botInventoryFrames
+        _G.ResetCursor = function() end
+        _G.GetItemIcon = function(id) return "icon:" .. tostring(id) end
+        _G.GetItemInfo = function(item)
+            local id = type(item) == "number" and item or tonumber(item:match("item:(%d+)"))
+            if not id then return nil end
+            local consumable = id == 200
+            return "Item", itemLine(id, "Canonical"), consumable and 1 or 2,
+                80, 0, consumable and "Consumable" or "Weapon", "", consumable and 20 or 1,
+                consumable and "" or "INVTYPE_WEAPON"
+        end
+        menuActions = {}
+        _G.UIDropDownMenu_Initialize = function(_, build) build() end
+        _G.UIDropDownMenu_CreateInfo = function() return {} end
+        _G.UIDropDownMenu_AddButton = function(info) menuActions[info.text] = info.func end
+        _G.ToggleDropDownMenu = function() end
+    end)
+
+    it("destroys the displayed item from its original position after an occupied swap", function()
+        local source, target = cell(100, 0, 3, 1), cell(200, 2, 8, 7)
+        swap(source, target)
+        assert.equals(itemLine(100, "Item"), target.itemLink)
+        assert.equals(itemLine(200, "Item"), source.itemLink)
+        assert.is_true(NS.CB_BridgeDestroyItem("bot", "Bot", target.itemLink, target))
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+~0~3~100~1$"))
+        assert.is_true(NS.CB_BridgeDestroyItem("bot", "Bot", source.itemLink, source))
+        assert.is_not_nil(Mock.addon[2].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+~2~8~200~7$"))
+    end)
+
+    it("moves the exact identity into an empty cell and clears the source", function()
+        local source, target = cell(100, 0, 3, 1), cell()
+        swap(source, target)
+        assert.is_nil(source.itemLink)
+        assert.is_nil(source.bag)
+        assert.is_nil(source.slot)
+        assert.is_nil(source.itemId)
+        assert.is_nil(source.count)
+        assert.is_true(NS.CB_BridgeDestroyItem("bot", "Bot", target.itemLink, target))
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+~0~3~100~1$"))
+    end)
+
+    it("keeps identical item IDs distinguished by their original positions and counts", function()
+        local source, target = cell(100, 0, 3, 1), cell(100, 2, 8, 7)
+        swap(source, target)
+        assert.is_true(NS.CB_BridgeDestroyItem("bot", "Bot", target.itemLink, target))
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+~0~3~100~1$"))
+        assert.is_true(NS.CB_BridgeDestroyItem("bot", "Bot", source.itemLink, source))
+        assert.is_not_nil(Mock.addon[2].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+~2~8~100~7$"))
+    end)
+
+    it("preserves every item's original position after consecutive swaps", function()
+        local first, second, third = cell(100, 0, 3, 1), cell(200, 2, 8, 7), cell(200, 1, 5, 4)
+        swap(first, second)
+        swap(second, third)
+
+        local expected = {
+            { target = first, id = 200, position = "~2~8~200~7$" },
+            { target = second, id = 200, position = "~1~5~200~4$" },
+            { target = third, id = 100, position = "~0~3~100~1$" },
+        }
+        for i, item in ipairs(expected) do
+            assert.equals(itemLine(item.id, "Item"), item.target.itemLink)
+            showMenu(item.target, "bot")
+            assert.is_not_nil(menuActions.Destroy)
+            menuActions.Destroy()
+            assert.equals(i, #Mock.addon)
+            assert.is_not_nil(Mock.addon[i].text:match("^RUN~ITEM_DESTROY~Bot~[^~]+" .. item.position))
+        end
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("uses reconciled server positions and counts after a visual swap", function()
+        local first, second = cell(100, 0, 3, 1), cell(200, 0, 8, 7)
+        local frame = { cells = { first, second }, rendered = true, IsShown = function() return true end }
+        for i = 3, 16 do frame.cells[i] = cell() end
+        NS.botInventoryFrames.bot = frame
+        local entry = CleanBot_PartyBots.bot
+        entry.professions = {}
+        swap(first, second)
+        assert.equals(0, #Mock.addon)
+
+        entry.awaitingInventory = true
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_EXACT_BEGIN~Bot~refresh")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_BAG~Bot~refresh~BACKPACK~0~0~16~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_ITEM_LOC~Bot~refresh~0~3~100~1~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_ITEM_LOC~Bot~refresh~0~9~200~5~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "INV_EXACT_END~Bot~refresh")
+        assert.is_false(entry.awaitingInventory)
+        assert.equals(2, #entry.inventory.items)
+        assert.equals(5, first.countText:GetText())
+
+        local expected = {
+            { target = first, id = 200, slot = 9, count = 5 },
+            { target = second, id = 100, slot = 3, count = 1 },
+        }
+        for i, item in ipairs(expected) do
+            assert.equals(itemLine(item.id, "Item"), item.target.itemLink)
+            assert.equals(item.id, item.target.icon:GetTexture())
+            assert.equals(0, item.target.bag)
+            assert.equals(item.slot, item.target.slot)
+            assert.equals(item.id, item.target.itemId)
+            assert.equals(item.count, item.target.count)
+            showMenu(item.target, "bot")
+            assert.is_not_nil(menuActions.Destroy)
+            menuActions.Destroy()
+            assert.equals(i, #Mock.addon)
+            local pattern = "^RUN~ITEM_DESTROY~Bot~[^~]+~0~" .. item.slot .. "~" .. item.id .. "~" .. item.count .. "$"
+            assert.is_not_nil(Mock.addon[i].text:match(pattern))
+        end
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    local scenarios = { "occupied", "empty", "same ID" }
+    local function movedCell(id, count, scenario)
+        local source = cell(id, 0, 3, count)
+        local otherId = scenario == "same ID" and id or (id == 100 and 200 or 100)
+        local target = scenario == "empty" and cell() or cell(otherId, 2, 8, 2)
+        source.itemLink = itemLine(tostring(id) .. ":11", "Selected")
+        if target.itemLink then target.itemLink = itemLine(tostring(otherId) .. ":22", "Other") end
+        local link = source.itemLink
+        swap(source, target)
+        assert.equals(link, target.itemLink)
+        return target, link
+    end
+
+    local actions = {
+        { label = "Equip", id = 100, count = 1, opcode = "ITEM_EQUIP", chat = "e " },
+        { label = "Use", id = 200, count = 7, opcode = "ITEM_USE", chat = "u " },
+        { label = "Trade", id = 100, count = 1, chat = "t " },
+        { label = "Sell", id = 200, count = 7, opcode = "ITEM_SELL", chat = "s " },
+        { label = "Disenchant", id = 100, count = 1, chat = "cast 13262 " },
+        { label = "Deposit to Guild Bank", id = 200, count = 7,
+            opcode = "ITEM_DEPOSIT_EXACT", extra = "~GBANK_DEPOSIT", chat = "guild bank " },
+        { label = "Destroy", id = 100, count = 1, opcode = "ITEM_DESTROY", chat = "destroy " },
+    }
+    for _, action in ipairs(actions) do
+        for _, scenario in ipairs(scenarios) do
+            for _, state in ipairs({ "present", "absent" }) do
+                it(action.label .. " targets the displayed item after " .. scenario .. " swap, bridge " .. state, function()
+                    NS.bridgeState = state
+                    local target = movedCell(action.id, action.count, scenario)
+                    showMenu(target, "bot")
+                    assert.is_not_nil(menuActions[action.label])
+                    menuActions[action.label]()
+                    if state == "present" and action.opcode then
+                        assert.equals(1, #Mock.addon)
+                        assert.equals(0, #Mock.whispers)
+                        local pattern = "^RUN~" .. action.opcode .. "~Bot~[^~]+" .. (action.extra or "")
+                            .. "~0~3~" .. action.id .. "~" .. action.count .. "$"
+                        assert.is_not_nil(Mock.addon[1].text:match(pattern))
+                    else
+                        assert.equals(0, #Mock.addon)
+                        assert.equals(1, #Mock.whispers)
+                        assert.equals("Bot", Mock.whispers[1].target)
+                        assert.equals(action.chat .. itemLine(action.id, "Canonical"), Mock.whispers[1].text)
+                    end
+                    if action.label == "Use" then
+                        assert.equals(6, target.count)
+                        assert.equals(6, target.countText:GetText())
+                    elseif action.label == "Disenchant" then
+                        assert.is_true(CleanBot_PartyBots.bot.isDisenchanting)
+                    end
+                end)
+            end
+        end
+    end
+
+    for _, scenario in ipairs(scenarios) do
+        for _, state in ipairs({ "present", "absent" }) do
+            it("trade drag uses the displayed link after " .. scenario .. " swap, bridge " .. state, function()
+                NS.bridgeState = state
+                local target, link = movedCell(100, 1, scenario)
+                NS.dragging = { key = "bot", link = link, sourceCell = target, dropTradeSlot = {} }
+                NS.CB_StopDrag()
+                assert.equals(0, #Mock.addon)
+                assert.equals(1, #Mock.whispers)
+                assert.equals("Bot", Mock.whispers[1].target)
+                assert.equals("t " .. itemLine(100, "Canonical"), Mock.whispers[1].text)
+            end)
+
+            it("equip drag uses the displayed identity after " .. scenario .. " swap, bridge " .. state, function()
+                NS.bridgeState = state
+                local target, link = movedCell(100, 1, scenario)
+                local equipSlot = { icon = region(nil) }
+                NS.dragging = { key = "bot", link = link, sourceCell = target, dropBtn = equipSlot }
+                NS.CB_StopDrag()
+                if state == "present" then
+                    assert.equals(1, #Mock.addon)
+                    assert.equals(0, #Mock.whispers)
+                    assert.is_not_nil(Mock.addon[1].text:match("^RUN~ITEM_EQUIP~Bot~[^~]+~0~3~100~1$"))
+                else
+                    assert.equals(0, #Mock.addon)
+                    assert.equals(1, #Mock.whispers)
+                    assert.equals("e " .. itemLine(100, "Canonical"), Mock.whispers[1].text)
+                end
+                assert.equals(link, equipSlot.itemLink)
+                assert.is_nil(target.itemLink)
+            end)
+
+            it("personal bank deposit targets the displayed stack after " .. scenario .. " swap, bridge " .. state, function()
+                NS.bridgeState = state
+                local target, link = movedCell(200, 7, scenario)
+                NS.CB_BankMove("bot", "Bot", link, "deposit", target)
+                if state == "present" then
+                    assert.equals(1, #Mock.addon)
+                    assert.equals(0, #Mock.whispers)
+                    assert.is_not_nil(Mock.addon[1].text:match("^RUN~ITEM_DEPOSIT_EXACT~Bot~[^~]+~BANK_DEPOSIT~0~3~200~7$"))
+                else
+                    assert.equals(0, #Mock.addon)
+                    assert.equals(1, #Mock.whispers)
+                    assert.equals("bank " .. itemLine(200, "Canonical"), Mock.whispers[1].text)
+                end
+            end)
+        end
+    end
+
+    NS.CB_StopDisenchantWatcher()
+    NS.CB_ApplyItemVisuals = originalVisuals
+    _G.ResetCursor = originalResetCursor
+    inventoryKind.frames = originalFrames
+    for _, name in ipairs(globalNames) do _G[name] = originalGlobals[name] end
+    for _, name in ipairs(nsNames) do NS[name] = originalNS[name] end
+end)
+
 describe("Bridge single sell (ITEM_SELL)", function()
     local link = "|cffffffff|Hitem:1234|h[Grey Thing]|h|r"
     before_each(function()

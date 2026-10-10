@@ -939,6 +939,12 @@ local function CB_StopDrag()
         if tmpCount then invDropCell.countText:SetText(tmpCount); invDropCell.countText:Show()
         else invDropCell.countText:Hide() end
 
+        -- Only the display moves; each item keeps its original server coordinates.
+        src.bag, invDropCell.bag = invDropCell.bag, src.bag
+        src.slot, invDropCell.slot = invDropCell.slot, src.slot
+        src.itemId, invDropCell.itemId = invDropCell.itemId, src.itemId
+        src.count, invDropCell.count = invDropCell.count, src.count
+
         -- Sync quality borders to match swapped item links.
         NS.CB_ApplyItemVisuals(src, src.itemLink)
         NS.CB_ApplyItemVisuals(invDropCell, invDropCell.itemLink)
