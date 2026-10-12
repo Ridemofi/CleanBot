@@ -112,6 +112,63 @@ describe("ChatFilter incoming whisper (reply window)", function()
     end)
 end)
 
+describe("ChatFilter nearby object query (whisper)", function()
+    local target = "|cffffff00|Hfound:17370383765803652289:177217:|h[Gordok Inner Door]|h|r"
+    local header = "[T] --- Game objects ---"
+
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot" }, other = { name = "Other" } }
+        NS.debugBridgeOverride = "absent"
+        NS.hideBotChatter = true
+        NS.selfWhispers, NS.botReplyWindow, NS.botInInventoryBurst = {}, {}, {}
+    end)
+
+    it("hides the addon query and replies in either event/filter order for every chat window", function()
+        NS.CB_FetchNearbyObjects("Bot", function() end)
+        assert.equals("los gos", Mock.whispers[1].text)
+        assert.is_true(filter("CHAT_MSG_WHISPER_INFORM", "los gos", "Bot"))
+        Mock.now = 0.1
+        assert.is_false(filter("CHAT_MSG_WHISPER_INFORM", "los gos", "Bot"))
+        assert.is_true(filter("CHAT_MSG_WHISPER", header, "Bot"))
+        Mock.fireEvent("CHAT_MSG_WHISPER", header, "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] " .. target, "Bot")
+        assert.is_true(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+        assert.is_true(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+    end)
+
+    it("hides object replies during an earlier inventory burst and respects Hide Bot Chatter", function()
+        NS.CB_FetchNearbyObjects("Bot", function() end)
+        NS.botInInventoryBurst.bot = true
+        assert.is_true(filter("CHAT_MSG_WHISPER", header, "Bot"))
+        assert.is_true(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+        NS.hideBotChatter = false
+        assert.is_false(filter("CHAT_MSG_WHISPER", header, "Bot"))
+        assert.is_false(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+        assert.is_false(filter("CHAT_MSG_WHISPER_INFORM", "los gos", "Bot"))
+    end)
+
+    it("leaves manual object lists and another bot's messages visible", function()
+        assert.is_false(filter("CHAT_MSG_WHISPER", header, "Bot"))
+        assert.is_false(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+        assert.is_false(filter("CHAT_MSG_WHISPER_INFORM", "los gos", "Bot"))
+        NS.CB_FetchNearbyObjects("Bot", function() end)
+        assert.is_false(filter("CHAT_MSG_WHISPER", header, "Other"))
+        assert.is_false(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Other"))
+    end)
+
+    it("stops hiding object replies once the query and reply window have ended", function()
+        NS.CB_FetchNearbyObjects("Bot", function() end)
+        assert.is_true(filter("CHAT_MSG_WHISPER", header, "Bot"))
+        Mock.fireEvent("CHAT_MSG_WHISPER", header, "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] " .. target, "Bot")
+        assert.is_true(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+        Mock.tick(0.6)
+        assert.is_nil(CleanBot_PartyBots.bot.nearbyObjects)
+        assert.is_false(filter("CHAT_MSG_WHISPER", "[T] " .. target, "Bot"))
+    end)
+end)
+
 describe("ChatFilter trade inventory burst", function()
     before_each(function()
         Mock.reset()

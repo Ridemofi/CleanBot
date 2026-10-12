@@ -347,9 +347,52 @@ NS.CB_StopDisenchantWatcher  = CB_StopDisenchantWatcher
 local invMenu = CreateFrame("Frame", "CleanBotInvMenu", UIParent, "UIDropDownMenuTemplate")
 local CB_DoSell
 
+local objectUseMenu = CreateFrame("Frame", "CleanBotObjectUseMenu", UIParent, "UIDropDownMenuTemplate")
+local objectUseSearch = 0
+
+local function CB_ShowObjectUseMenu(cell, key)
+    local entry = CleanBot_PartyBots[key]
+    if not entry or not cell.itemLink then return end
+    local botName, itemLink = entry.name, cell.itemLink
+    local bag, slot, itemId, count = cell.bag, cell.slot, cell.itemId, cell.count
+    objectUseSearch = objectUseSearch + 1
+    local search = objectUseSearch
+    CloseDropDownMenus()
+    NS.CB_FetchNearbyObjects(botName, function(objects, err)
+        if search ~= objectUseSearch then return end
+        if not objects or #objects == 0 then
+            NS.CB_Print(err or "Nothing nearby to use this on")
+            return
+        end
+        local menu = {}
+        for _, objectLink in ipairs(objects) do
+            local targetLink = objectLink
+            menu[#menu + 1] = {
+                text = strmatch(targetLink, "|h%[(.-)%]|h"), notCheckable = true,
+                func = function()
+                    local current = CleanBot_PartyBots[key]
+                    if search ~= objectUseSearch or not current or current.name ~= botName
+                        or cell.itemLink ~= itemLink
+                        or cell.bag ~= bag or cell.slot ~= slot or cell.itemId ~= itemId
+                        or cell.count ~= count then
+                        NS.CB_Print("The item changed. Open its menu again.")
+                        return
+                    end
+                    objectUseSearch = objectUseSearch + 1
+                    NS.CB_SendBotCommand(botName, "u " .. NS.CB_CleanItemLink(itemLink) .. " " .. targetLink)
+                    NS.CB_ScheduleReconcile(key, botName)
+                end,
+            }
+        end
+        menu[#menu + 1] = { text = "Cancel", notCheckable = true, func = function() CloseDropDownMenus() end }
+        EasyMenu(menu, objectUseMenu, "cursor", 0, 0, "MENU")
+    end)
+end
+
 ---@param cell table   The inventory cell button the context menu opens from.
 ---@param key  string  Bot name-key the cell belongs to.
 local function CB_ShowInvMenu(cell, key)
+    objectUseSearch = objectUseSearch + 1
     if not cell.itemLink then return end
     local _, _, _, _, _, itemType, _, _, equipLoc = GetItemInfo(cell.itemLink)
     equipLoc = equipLoc or ""
@@ -371,8 +414,11 @@ local function CB_ShowInvMenu(cell, key)
             UIDropDownMenu_AddButton(info)
         end
 
-        if isConsumable then
+        do
             info.text = "Use"
+            info.tooltipTitle = "Use"
+            info.tooltipText = "Left-click: use directly.\nRight-click: choose a nearby object."
+            info.tooltipOnButton = 1
             info.func = function()
                 local entry = CleanBot_PartyBots[key]
                 if not entry then return end
@@ -384,7 +430,7 @@ local function CB_ShowInvMenu(cell, key)
                     NS.CB_ScheduleReconcile(key, entry.name)
                     sent = true
                 end
-                if sent then
+                if sent and isConsumable then
                     -- Optimistic update: decrement stack or clear cell immediately.
                     -- IsShown gate: a hidden countText still holds the previous occupant's number.
                     local curCount = cell.countText:IsShown() and tonumber(cell.countText:GetText()) or 1
@@ -405,6 +451,19 @@ local function CB_ShowInvMenu(cell, key)
                 end
             end
             UIDropDownMenu_AddButton(info)
+            local button = _G["DropDownList1Button" .. DropDownList1.numButtons]
+            button.cbObjectUseFunc = info.func
+            button.cbObjectUse = function() CB_ShowObjectUseMenu(cell, key) end
+            if not button.cbObjectUseHooked then
+                button:HookScript("OnMouseUp", function(self, mouseButton)
+                    if mouseButton == "RightButton" and UIDROPDOWNMENU_OPEN_MENU == invMenu
+                        and self.func == self.cbObjectUseFunc then
+                        self.cbObjectUse()
+                    end
+                end)
+                button.cbObjectUseHooked = true
+            end
+            info.tooltipTitle, info.tooltipText, info.tooltipOnButton = nil, nil, nil
         end
 
         -- Quest items cannot be traded or sold. Trade uses chat trigger "t";

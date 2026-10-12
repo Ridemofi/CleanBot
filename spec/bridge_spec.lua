@@ -146,6 +146,116 @@ describe("Serial whisper queue", function()
     end)
 end)
 
+describe("Nearby object collection (whisper)", function()
+    local first = "|cffffff00|Hfound:17370383765803652289:177217:|h[Gordok Inner Door]|h|r"
+    local second = "|cffffff00|Hfound:17370383765803652290:177217:|h[Gordok Inner Door]|h|r"
+
+    before_each(function()
+        Mock.reset()
+        CleanBot_PartyBots = { bot = { name = "Bot" }, other = { name = "Other" } }
+        NS.debugBridgeOverride = "absent"
+    end)
+
+    it("collects prefixed links after the matching bot's header and preserves distinct objects", function()
+        local result
+        NS.CB_FetchNearbyObjects("Bot", function(objects) result = objects end)
+        assert.equals(0, #Mock.addon)
+        assert.equals("los gos", Mock.whispers[1].text)
+        assert.equals("Bot", Mock.whispers[1].target)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Other")
+        Mock.fireEvent("CHAT_MSG_WHISPER", first, "Other")
+        Mock.fireEvent("CHAT_MSG_WHISPER", first, "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] --- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] " .. first, "Bot")
+        Mock.tick(0.3)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] " .. second, "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "unrelated chatter", "Bot")
+        Mock.tick(0.3)
+        assert.is_nil(result)
+        Mock.tick(0.3)
+        assert.same({ first, second }, result)
+    end)
+
+    it("returns an empty list when the header arrives without objects", function()
+        local result, err
+        NS.CB_FetchNearbyObjects("Bot", function(objects, failure) result, err = objects, failure end)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] --- Game objects ---", "Bot")
+        Mock.tick(0.6)
+        assert.same({}, result)
+        assert.is_nil(err)
+    end)
+
+    it("times out without a header, releases the queue and ignores late responses", function()
+        local calls, err = 0, nil
+        NS.CB_FetchNearbyObjects("Bot", function(objects, failure)
+            calls, err = calls + 1, failure
+            assert.is_nil(objects)
+        end)
+        NS.CB_SendBotCommand("Bot", "stats")
+        Mock.tick(0.3)
+        assert.equals(0, calls)
+        assert.equals(1, #Mock.whispers)
+        Mock.tick(0.3)
+        assert.equals(1, calls)
+        assert.equals("Nearby object search timed out.", err)
+        assert.equals("stats", Mock.whispers[2].text)
+        assert.is_nil(CleanBot_PartyBots.bot.nearbyObjects)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", first, "Bot")
+        Mock.tick(0.6)
+        assert.equals(1, calls)
+    end)
+
+    it("keeps a streaming list and the queue open beyond five seconds", function()
+        local result
+        NS.CB_FetchNearbyObjects("Bot", function(objects) result = objects end)
+        NS.CB_SendBotCommand("Bot", "stats")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Bot")
+        for i = 1, 20 do
+            Mock.tick(0.3)
+            Mock.fireEvent("CHAT_MSG_WHISPER", first, "Bot")
+            assert.is_nil(result)
+            assert.equals(1, #Mock.whispers)
+        end
+        Mock.tick(0.3)
+        assert.is_nil(result)
+        Mock.tick(0.3)
+        assert.equals(20, #result)
+        assert.equals(first, result[20])
+        assert.equals("stats", Mock.whispers[2].text)
+    end)
+
+    it("starts the silence timer when the queued query is actually sent", function()
+        NS.CB_SendBotCommand("Bot", "co ?")
+        local calls = 0
+        NS.CB_FetchNearbyObjects("Bot", function() calls = calls + 1 end)
+        Mock.tick(2)
+        assert.equals("los gos", Mock.whispers[2].text)
+        assert.equals(0, calls)
+        Mock.tick(0.3)
+        assert.equals(0, calls)
+        Mock.tick(0.3)
+        assert.equals(1, calls)
+    end)
+
+    it("separates the results of consecutive queued object queries", function()
+        local results = {}
+        local function collect(objects) results[#results + 1] = objects end
+        NS.CB_FetchNearbyObjects("Bot", collect)
+        NS.CB_FetchNearbyObjects("Bot", collect)
+        assert.equals(1, #Mock.whispers)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", first, "Bot")
+        Mock.tick(0.6)
+        assert.same({ { first } }, results)
+        assert.equals("los gos", Mock.whispers[2].text)
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", second, "Bot")
+        Mock.tick(0.6)
+        assert.same({ { first }, { second } }, results)
+    end)
+end)
+
 describe("Bridge addon packets (CHAT_MSG_ADDON)", function()
     before_each(function()
         Mock.reset()
@@ -447,10 +557,13 @@ describe("Inventory visual swaps preserve exact item commands", function()
     local originalVisuals = NS.CB_ApplyItemVisuals
     local originalResetCursor = _G.ResetCursor
     local globalNames = { "GetItemInfo", "GetItemIcon", "UIDropDownMenu_Initialize",
-        "UIDropDownMenu_CreateInfo", "UIDropDownMenu_AddButton", "ToggleDropDownMenu" }
+        "UIDropDownMenu_CreateInfo", "UIDropDownMenu_AddButton", "ToggleDropDownMenu",
+        "DropDownList1", "DropDownList1Button1", "DropDownList1Button2", "UIDROPDOWNMENU_OPEN_MENU",
+        "CloseDropDownMenus", "EasyMenu" }
     local nsNames = { "CB_ClearQualityBorder", "CB_SetQualityBorder", "CB_SetRarityOverlay", "CB_AddWowheadMenuButton",
         "botInventoryFrames", "botBankFrames" }
     local originalGlobals, originalNS, menuActions = {}, {}, {}
+    local objectMenu
     for _, name in ipairs(globalNames) do originalGlobals[name] = _G[name] end
     for _, name in ipairs(nsNames) do originalNS[name] = NS[name] end
 
@@ -518,10 +631,111 @@ describe("Inventory visual swaps preserve exact item commands", function()
                 consumable and "" or "INVTYPE_WEAPON"
         end
         menuActions = {}
-        _G.UIDropDownMenu_Initialize = function(_, build) build() end
+        objectMenu = nil
+        _G.DropDownList1 = { numButtons = 0 }
+        for i = 1, 2 do
+            _G["DropDownList1Button" .. i] = {
+                hooks = {},
+                HookScript = function(self, event, fn)
+                    self.hooks[#self.hooks + 1] = { event = event, fn = fn }
+                end,
+            }
+        end
+        _G.UIDropDownMenu_Initialize = function(frame, build)
+            UIDROPDOWNMENU_OPEN_MENU = frame
+            DropDownList1.numButtons = 0
+            build()
+        end
         _G.UIDropDownMenu_CreateInfo = function() return {} end
-        _G.UIDropDownMenu_AddButton = function(info) menuActions[info.text] = info.func end
+        _G.UIDropDownMenu_AddButton = function(info)
+            menuActions[info.text] = info.func
+            DropDownList1.numButtons = DropDownList1.numButtons + 1
+            local button = _G["DropDownList1Button" .. DropDownList1.numButtons]
+            if button then button.func = info.func end
+        end
         _G.ToggleDropDownMenu = function() end
+        _G.CloseDropDownMenus = function() end
+        _G.EasyMenu = function(menu) objectMenu = menu end
+    end)
+
+    it("right-click on Use selects a nearby object without using or decrementing the item first", function()
+        local item = cell(200, 0, 3, 7)
+        showMenu(item, "bot")
+        local button = DropDownList1Button1
+        assert.equals(1, #button.hooks)
+        button.hooks[1].fn(button, "RightButton")
+        assert.equals(7, item.count)
+        assert.equals(1, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        local token = Mock.addon[1].text:match("^GET~GAMEOBJECTS~Bot~(.+)$")
+        assert.is_not_nil(token)
+        local target = "|cffffff00|Hfound:17370383765803652289:177217:|h[Gordok Inner Door]|h|r"
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "GAMEOBJECTS_BEGIN~Bot~" .. token)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "GAMEOBJECTS_ITEM~Bot~" .. token .. "~" .. target)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "GAMEOBJECTS_END~Bot~" .. token)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "GAMEOBJECTS_DONE~" .. token)
+        assert.equals("Gordok Inner Door", objectMenu[1].text)
+        objectMenu[1].func()
+        assert.equals(1, #Mock.whispers)
+        assert.equals("u " .. itemLine(200, "Canonical") .. " " .. target, Mock.whispers[1].text)
+    end)
+
+    it("selects a nearby object through whisper when the bridge is absent", function()
+        NS.debugBridgeOverride = "absent"
+        local item = cell(200, 0, 3, 7)
+        showMenu(item, "bot")
+        local button = DropDownList1Button1
+        button.hooks[1].fn(button, "RightButton")
+        assert.equals("los gos", Mock.whispers[1].text)
+        assert.equals(0, #Mock.addon)
+        assert.equals(7, item.count)
+        local target = "|cffffff00|Hfound:17370383765803652289:177217:|h[Gordok Inner Door]|h|r"
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] --- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "[T] " .. target, "Bot")
+        Mock.tick(0.6)
+        assert.equals("Gordok Inner Door", objectMenu[1].text)
+        objectMenu[1].func()
+        assert.equals(2, #Mock.whispers)
+        assert.equals("u " .. itemLine(200, "Canonical") .. " " .. target, Mock.whispers[2].text)
+        assert.equals("Bot", Mock.whispers[2].target)
+        assert.equals(7, item.count)
+    end)
+
+    it("Cancel closes the object selector without treating the clicked button as a menu level", function()
+        NS.debugBridgeOverride = "absent"
+        showMenu(cell(200, 0, 3, 7), "bot")
+        local button = DropDownList1Button1
+        button.hooks[1].fn(button, "RightButton")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "--- Game objects ---", "Bot")
+        Mock.fireEvent("CHAT_MSG_WHISPER", "|cffffff00|Hfound:1:177217:|h[Door]|h|r", "Bot")
+        Mock.tick(0.6)
+        local hidden = 0
+        _G.CloseDropDownMenus = function(level)
+            for i = level or 1, 2 do hidden = hidden + 1 end
+        end
+        local cancel = objectMenu[#objectMenu]
+        assert.equals("Cancel", cancel.text)
+        cancel.func({}, nil, nil, false)
+        assert.equals(2, hidden)
+        assert.equals(1, #Mock.whispers)
+    end)
+
+    it("binds right-click once and ignores left-click and reused menu buttons", function()
+        local item = cell(200, 0, 3, 7)
+        showMenu(item, "bot")
+        showMenu(item, "bot")
+        local button = DropDownList1Button1
+        assert.equals(1, #button.hooks)
+        button.hooks[1].fn(button, "LeftButton")
+        assert.equals(0, #Mock.addon)
+        local use = button.func
+        button.func = function() end
+        button.hooks[1].fn(button, "RightButton")
+        assert.equals(0, #Mock.addon)
+        button.func = use
+        UIDROPDOWNMENU_OPEN_MENU = {}
+        button.hooks[1].fn(button, "RightButton")
+        assert.equals(0, #Mock.addon)
     end)
 
     it("destroys the displayed item from its original position after an occupied swap", function()

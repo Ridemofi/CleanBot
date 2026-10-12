@@ -136,6 +136,14 @@ local function filterWhisper(_, _, msg, sender)
         local key = strlower(sender)
         local now = GetTime()
 
+        -- Only hide object-list lines while CleanBot's own query is in flight.
+        local entry = CleanBot_PartyBots[key]
+        if entry and entry.nearbyObjects and msg
+            and (msg:find("--- Game objects ---", 1, true) or msg:find("|Hfound:", 1, true)) then
+            NS.botReplyWindow[key] = now + NS.WHISPER_SILENCE
+            return true
+        end
+
         -- Inventory dump header
         if msg and msg:match("^===%s*[iI]nventory%s*===") then
             NS.botReplyWindow = NS.botReplyWindow or {}

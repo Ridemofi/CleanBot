@@ -983,12 +983,19 @@ invTickFrame:SetScript("OnUpdate", function(self, dt)
             end
         end
 
+        local objects = entry.nearbyObjects
+        if objects and GetTime() - objects.lastReply >= NS.WHISPER_SILENCE then
+            entry.nearbyObjects = nil
+            objects.callback(objects.begun and objects.objects or nil,
+                not objects.begun and "Nearby object search timed out." or nil)
+        end
+
         -- Serial-queue completion: the in-flight request is done once the bot's reply stream
         -- goes silent. Runs AFTER the typed finalizes above (which parse/render this reply),
         -- so the next request is sent only once the current one is fully handled.
         if entry.wqBusy then
             entry.wqTimeout = (entry.wqTimeout or 0) + dt
-            if entry.wqTimeout >= NS.WHISPER_SILENCE then
+            if entry.wqTimeout >= NS.WHISPER_SILENCE and not entry.nearbyObjects then
                 entry.wqBusy = false
             end
         end
@@ -1634,6 +1641,32 @@ NS.CB_BridgeEquipItem = function(key, botName, link, cell)
     end
 end
 
+local pendingGameObjects = {}
+
+NS.CB_FetchNearbyObjects = function(botName, callback)
+    if CB_EffectiveBridgeState() ~= "present" then
+        NS.CB_EnqueueRequest(strlower(botName), function()
+            local entry = CleanBot_PartyBots[strlower(botName)]
+            if not entry then
+                callback(nil, "The bot is no longer available.")
+                return
+            end
+            entry.nearbyObjects = { objects = {}, callback = callback, lastReply = GetTime() }
+            CB_SendBotCommandRaw(botName, "los gos")
+        end)
+        return
+    end
+    local token = CB_NextToken("objects")
+    local request = { name = strlower(botName), objects = {}, callback = callback }
+    pendingGameObjects[token] = request
+    CB_SendBridge("GET~GAMEOBJECTS~" .. botName .. "~" .. token)
+    NS.CB_After(5, function()
+        if pendingGameObjects[token] ~= request then return end
+        pendingGameObjects[token] = nil
+        callback(nil, "Nearby object search timed out.")
+    end)
+end
+
 -- Uses an item (consumable). Uses ITEM_USE_V1 when bridge is present with exact bag/slot coordinates,
 -- whisper "u <link>" only when bridge is absent.
 ---@param key     string Bot name-key.
@@ -1880,6 +1913,20 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- this bot's reply streams in, so the queue waits for the full reply before advancing.
         if entry and entry.wqBusy then entry.wqTimeout = 0 end
         if entry and entry.awaitingBankOp then entry.bankOpTimeout = 0 end
+
+        local objects = entry and entry.nearbyObjects
+        if objects then
+            if strfind(msg, "--- Game objects ---", 1, true) then
+                objects.begun, objects.lastReply = true, GetTime()
+                return
+            end
+            local link = strmatch(msg, "(|c%x+|Hfound:%d+:%d+:|h.-|h|r)")
+            if objects.begun and link then
+                objects.objects[#objects.objects + 1] = link
+                objects.lastReply = GetTime()
+                return
+            end
+        end
 
         -- No-banker error: a bank list/deposit/withdraw issued with no banker NPC near
         -- the bot. The chat filter hides this line from chat, but this handler still
@@ -2181,6 +2228,38 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             -- real bridge would keep pushing strategy/inventory data and the
             -- "absent" simulation would be incomplete.
             return
+
+        elseif msg and strsub(msg, 1, 12) == "GAMEOBJECTS_" then
+            local opcode, payload = NS.CB_SplitOnce(msg, "~")
+            if opcode == "GAMEOBJECTS_DONE" then
+                local request = pendingGameObjects[payload]
+                if request then
+                    pendingGameObjects[payload] = nil
+                    if request.complete then
+                        request.callback(request.objects)
+                    else
+                        request.callback(nil, "The bot could not list nearby objects.")
+                    end
+                end
+            else
+                local rawName, rest = NS.CB_SplitOnce(payload, "~")
+                local token, encodedLine = NS.CB_SplitOnce(rest, "~")
+                local request = pendingGameObjects[token]
+                if request and strlower(CB_UrlDecode(rawName)) == request.name then
+                    if opcode == "GAMEOBJECTS_BEGIN" then
+                        request.objects = {}
+                        request.begun = true
+                    elseif opcode == "GAMEOBJECTS_ITEM" and request.begun then
+                        local link = CB_UrlDecode(encodedLine)
+                        -- The bridge supplies nearby objects, without door/chest type metadata.
+                        if strmatch(link, "|Hfound:%d+:%d+:|h") then
+                            request.objects[#request.objects + 1] = link
+                        end
+                    elseif opcode == "GAMEOBJECTS_END" and request.begun then
+                        request.complete = true
+                    end
+                end
+            end
 
         elseif msg and strsub(msg, 1, 7) == "ROSTER~" then
             -- One packet packs EVERY bot: "Name,classId,level,mapId,alive,hp,mana;Name2,…"
