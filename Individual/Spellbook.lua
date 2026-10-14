@@ -22,7 +22,7 @@ local P = "Interface\\AddOns\\CleanBot\\Textures\\Spellbook\\"
 -- ── Geometry Constants ───────────────────────────────────────────────────
 local FRAME_W          = 1618
 local FRAME_H          = 883
-local UI_SCALE         = 0.64      -- 80% del tamaño anterior (1035x565 px en pantalla)
+local UI_SCALE         = 0.60
 
 local HEADER_H         = 58
 local PAGES_TOP        = -56
@@ -256,12 +256,10 @@ local function createCard(parent, index)
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetHyperlink("spell:" .. self.spellId)
         if not self.isPassive then
-            local f = self.bookFrame or NS.botSpellbookFrame or (self:GetParent() and self:GetParent():GetParent() and self:GetParent():GetParent():GetParent())
-            local bName = (f and (f.botName or f.botKey)) or "bot"
             local pName = UnitName("player") or "player"
 
             GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff00ff00Left-Click:|r Cast on " .. bName .. " (self)", 0.2, 1, 0.2)
+            GameTooltip:AddLine("|cff00ff00Left-Click:|r Cast on bot (or your target)", 0.2, 1, 0.2)
             GameTooltip:AddLine("|cff00ff00Right-Click:|r Cast on " .. pName .. " (you)", 0.2, 1, 0.2)
         end
         GameTooltip:Show()
@@ -273,20 +271,23 @@ local function createCard(parent, index)
         GameTooltip:Hide()
     end)
 
-    -- Click to order cast (Left = self, Right = player)
+    -- Click to order cast (Left = selected target or bot, Right = player)
     card:SetScript("OnClick", function(self, button)
         if self.isPassive or not self.spellId then return end
         local f = self.bookFrame or NS.botSpellbookFrame or (self:GetParent() and self:GetParent():GetParent() and self:GetParent():GetParent():GetParent())
         local botName = f and (f.botName or f.botKey)
         if not botName then return end
 
-        local targetName = (button == "RightButton") and (UnitName("player") or "player") or botName
+        local targetSuffix = ""
+        if button == "RightButton" then
+            targetSuffix = " on " .. (UnitName("player") or "player")
+        end
         local spellRef = (self.spellLink and self.spellLink ~= "" and self.spellLink) or self.spellName or ("spell:" .. self.spellId)
 
-        local cmd = "cast " .. spellRef .. " on " .. targetName
+        local cmd = "cast " .. spellRef .. targetSuffix
         NS.CB_SendBotCommand(botName, cmd)
         if NS.CB_Print then
-            NS.CB_Print(botName .. " casting: " .. spellRef .. " on " .. targetName)
+            NS.CB_Print(botName .. " casting: " .. spellRef .. targetSuffix)
         end
     end)
 
