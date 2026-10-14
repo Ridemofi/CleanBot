@@ -19,6 +19,118 @@ if not CleanBotNS.SPEC_DPS_TOKEN then dofile("Individual/ClassData.lua") end
 if not CleanBotNS.CB_BuildProfessionRecipeTree then dofile("Individual/Professions.lua") end
 local NS = CleanBotNS
 
+describe("CB_BridgeAbandonQuest", function()
+    before_each(function()
+        Mock.reset()
+        Mock.party = 1
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        NS.capabilities = {}
+        CleanBot_PartyBots = { bot = { name = "Bot" } }
+    end)
+
+    local function request(questId, callback)
+        NS.CB_BridgeAbandonQuest("Bot", questId, callback)
+        return Mock.addon[#Mock.addon].text:match("^RUN~QUEST_ABANDON_TARGET~([^~]+)~Bot~%d+$")
+    end
+
+    local function reply(token, name, questId, status, reason, abandoned)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", table.concat({
+            "QUEST_ABANDON_TARGET_RESULT", token, name, tostring(questId), status, reason, tostring(abandoned),
+        }, "~"))
+    end
+
+    it("sends a targeted quest abandonment request without capability gating", function()
+        local result
+        local token = request(404, function(ok) result = ok end)
+        assert.is_not_nil(token)
+        assert.equals("RUN~QUEST_ABANDON_TARGET~" .. token .. "~Bot~404", Mock.addon[1].text)
+        assert.equals("MBOT", Mock.addon[1].prefix)
+        assert.equals("PARTY", Mock.addon[1].channel)
+        assert.equals(0, #Mock.whispers)
+        assert.is_nil(result)
+        reply(token, "Bot", 404, "OK", "OK", 1)
+        assert.is_true(result)
+    end)
+
+    it("ignores mismatched and malformed result packets", function()
+        local calls = 0
+        local token = request(404, function() calls = calls + 1 end)
+        reply("unrelated", "Bot", 404, "OK", "OK", 1)
+        reply(token, "Other", 404, "OK", "OK", 1)
+        reply(token, "Bot", 405, "OK", "OK", 1)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUEST_ABANDON_TARGET_RESULT~" .. token)
+        assert.equals(0, calls)
+        reply(token, "Bot", 404, "OK", "OK", 1)
+        assert.equals(1, calls)
+    end)
+
+    it("reports decoded server errors without whisper fallback", function()
+        local success, reason
+        local token = request(404, function(ok, why) success, reason = ok, why end)
+        reply(token, "Bot", 404, "ERR", "NOT%20READY", 0)
+        assert.is_false(success)
+        assert.equals("NOT READY", reason)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("reports timeout once and ignores subsequent results without whisper fallback", function()
+        local results = {}
+        local token = request(404, function(ok, why) results[#results + 1] = { ok, why } end)
+        Mock.tick((NS.QUERY_TIMEOUT or 10) - 0.1)
+        assert.equals(0, #results)
+        Mock.tick(0.2)
+        assert.same({ { false, "TIMEOUT" } }, results)
+        reply(token, "Bot", 404, "OK", "OK", 1)
+        Mock.tick(NS.QUERY_TIMEOUT or 10)
+        assert.equals(1, #results)
+        assert.equals(0, #Mock.whispers)
+    end)
+
+    it("invokes the completion callback once for duplicate results and timeout", function()
+        local results = {}
+        local token = request(404, function(ok, why) results[#results + 1] = { ok, why } end)
+        reply(token, "Bot", 404, "OK", "OK", 1)
+        reply(token, "Bot", 404, "OK", "OK", 1)
+        Mock.tick(NS.QUERY_TIMEOUT or 10)
+        assert.same({ { true, "OK" } }, results)
+    end)
+
+    it("requires a confirmed abandonment count for successful completion", function()
+        local success
+        local token = request(404, function(ok) success = ok end)
+        reply(token, "Bot", 404, "OK", "OK", 0)
+        assert.is_false(success)
+    end)
+
+    it("correlates out-of-order results with their pending requests", function()
+        local results = {}
+        local first = request(404, function(ok) results[404] = ok end)
+        local second = request(405, function(ok) results[405] = ok end)
+        assert.is_true(first ~= second)
+        reply(second, "Bot", 405, "OK", "OK", 1)
+        assert.is_true(results[405])
+        assert.is_nil(results[404])
+        reply(first, "Bot", 404, "ERR", "NO_QUEST", 0)
+        assert.is_false(results[404])
+        assert.is_true(results[405])
+    end)
+
+    it("rejects invalid quest IDs without sending requests", function()
+        local results = {}
+        local function complete(ok, why) results[#results + 1] = { ok, why } end
+        NS.CB_BridgeAbandonQuest("Bot", nil, complete)
+        for _, id in ipairs({ 0, -1, 1.5, "invalid" }) do
+            NS.CB_BridgeAbandonQuest("Bot", id, complete)
+        end
+        assert.equals(5, #results)
+        for _, result in ipairs(results) do assert.same({ false, "BAD_REQUEST" }, result) end
+        assert.equals(0, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        assert.equals(0, #Mock.timers)
+    end)
+end)
+
 -- Item line as the bot streams it (the "items"/"bank" reply format).
 local function itemLine(id, name, count)
     local s = "|cffffffff|Hitem:" .. id .. "|h[" .. name .. "]|h|r"

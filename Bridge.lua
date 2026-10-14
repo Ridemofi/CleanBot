@@ -1782,6 +1782,26 @@ NS.CB_BridgeWithdrawItem = function(key, botName, link, count)
     return true
 end
 
+local pendingQuestAbandons = {}
+
+NS.CB_BridgeAbandonQuest = function(botName, questId, callback)
+    questId = tonumber(questId)
+    if not botName or not questId or questId <= 0 or questId ~= math.floor(questId) then
+        callback(false, "BAD_REQUEST")
+        return
+    end
+
+    local token = CB_NextToken("qdrop")
+    local request = { botName = botName, questId = questId, callback = callback }
+    pendingQuestAbandons[token] = request
+    CB_SendBridge(string.format("RUN~QUEST_ABANDON_TARGET~%s~%s~%d", token, botName, questId))
+    NS.CB_After(NS.QUERY_TIMEOUT or 10, function()
+        if pendingQuestAbandons[token] ~= request then return end
+        pendingQuestAbandons[token] = nil
+        callback(false, "TIMEOUT")
+    end)
+end
+
 -- Fetches the quest log for a bot. Bridge path sends a structured GET~QUESTS
 -- request; the QUESTS_BEGIN/ITEM/END packets are handled below in the
 -- CHAT_MSG_ADDON block. Whisper "quests all" only when bridge is absent and parses the reply
@@ -2884,6 +2904,16 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 else
                     NS.CB_ScheduleReconcile(key, botName)
                 end
+            end
+
+        elseif msg and msg:match("^QUEST_ABANDON_TARGET_RESULT~") then
+            local token, rawName, questId, status, reason, abandoned = msg:match(
+                "^QUEST_ABANDON_TARGET_RESULT~([^~]+)~([^~]+)~(%d+)~([^~]+)~([^~]*)~(%d+)$")
+            local request = token and pendingQuestAbandons[token]
+            if request and strlower(CB_UrlDecode(rawName)) == strlower(request.botName)
+                and tonumber(questId) == request.questId then
+                pendingQuestAbandons[token] = nil
+                request.callback(status == "OK" and tonumber(abandoned) == 1, CB_UrlDecode(reason))
             end
 
         -- ── Quest log packets ────────────────────────────────────────────

@@ -487,18 +487,16 @@ NS.CB_RenderQuestDetail = function(key, questID)
     end
 
     -- ── Wire the Abandon button to this quest ──────────────────────────────
-    -- The server's drop command matches by |Hquest:| link or title substring — a bare
-    -- numeric id matches nothing (extractQuestId needs an Hquest link), so the NAME is
-    -- required. Bot record first (carries the whisper-path link title; the bridge path
-    -- has no title — its name field is the id again), then the player's name cache.
+    -- Bridge abandonment uses the quest ID; the whisper path needs its title.
+    local useBridge = NS.CB_EffectiveBridgeState() == "present"
     local abandonName = (botQuest and botQuest.name)
         or (questID and NS.questNameCache[questID])
 
     if f.abandonBtn then
-        -- No resolvable name yet (bridge path + quest the player doesn't have): the drop
-        -- command cannot address the quest, so disable and resolve the title from the
-        -- client's quest cache — the re-render re-wires this button once it lands.
-        if not abandonName then
+        if f.abandonPending then
+            f.abandonBtn:Disable()
+        elseif not useBridge and not abandonName then
+            -- The whisper path cannot address a quest without its title.
             f.abandonBtn:Disable()
             NS.CB_ResolveQuestName(questID, function(title)
                 if title and f.selectedQuestID == questID and f:IsShown() then
@@ -509,11 +507,31 @@ NS.CB_RenderQuestDetail = function(key, questID)
             f.abandonBtn:Enable()
         end
         f.abandonBtn:SetScript("OnClick", function()
-            if not entry or not abandonName then return end
+            if not entry or f.abandonPending then return end
+            if NS.CB_EffectiveBridgeState() == "present" then
+                f.abandonPending = true
+                f.abandonBtn:Disable()
+                NS.CB_BridgeAbandonQuest(entry.name, questID, function(success, reason)
+                    f.abandonPending = nil
+                    if not success then
+                        if NS.CB_Print then
+                            NS.CB_Print(string.format("%s cannot abandon quest %s: %s.", entry.name, tostring(questID), reason))
+                        end
+                        if f.selectedQuestID then
+                            NS.CB_RenderQuestDetail(key, f.selectedQuestID)
+                        end
+                        return
+                    end
+                    if f.selectedQuestID and f.selectedQuestID ~= questID then
+                        NS.CB_RenderQuestDetail(key, f.selectedQuestID)
+                    end
+                    NS.CB_FetchQuests(key, entry.name)
+                end)
+                return
+            end
+            if not abandonName then return end
             NS.CB_SendBotCommand(entry.name, "drop " .. abandonName)
-            -- Disable the button and wait 2 seconds before re-fetching.
-            -- The bot processes the command server-side; there is no structured
-            -- response packet, so a fixed timeout is the reliable refresh trigger.
+            -- The whisper path has no structured result; refresh after 2 seconds.
             f.abandonBtn:Disable()
             local elapsed = 0
             f:SetScript("OnUpdate", function(self, dt)
