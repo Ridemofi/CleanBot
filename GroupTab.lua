@@ -638,19 +638,6 @@ local function CB_LayoutGroupInnerTabs(classesPresent)
 
     if multi then
         sharedClassTab:SetText("Class")
-        UIDropDownMenu_Initialize(classDropdown, function()
-            for _, class in ipairs(presentClasses) do
-                local info        = UIDropDownMenu_CreateInfo()
-                info.text         = NS.CB_ClassIconMarkup(class) .. " "
-                                    .. ((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class)
-                info.value        = class
-                info.notCheckable = true
-                local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
-                if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
-                info.func         = function() CB_SelectGroupClass(class) end
-                UIDropDownMenu_AddButton(info)
-            end
-        end)
         UIDropDownMenu_SetText(classDropdown,
             NS.CB_ClassIconMarkup(selectedClass) .. " " .. CB_ClassColoredName(selectedClass))
     else
@@ -760,8 +747,9 @@ end
 -- Applies the group list's current selection: resolves the union of the selected
 -- groups' members, sets the member list, picks the managed selection (all by
 -- default; preserved across an internal refresh of the SAME group set so a state
--- packet can't reset a narrowed selection), then applies it. Kicks a silent
--- bridge-path state re-read. (The whisper path deliberately relies on the
+-- packet can't reset a narrowed selection), then applies it. User selections
+-- request a silent bridge-path state re-read; server refreshes use cached data.
+-- (The whisper path deliberately relies on the
 -- per-toggle ",?" self-heal instead of mass co?/nc? probes per selection.)
 ---@param fromUserClick boolean?  True on a group-list click (→ reselect all members).
 local function CB_ApplyGroupSelection(fromUserClick)
@@ -781,7 +769,7 @@ local function CB_ApplyGroupSelection(fromUserClick)
 
     lastAppliedSignature = signature
     CB_ApplyMemberSelection()
-    if #selectedGroupValues > 0 then NS.CB_RequestStates() end
+    if fromUserClick and #selectedGroupValues > 0 then NS.CB_RequestStates() end
 end
 
 -- Rebuilds only the left group list (items + re-highlight) without touching the
@@ -1120,6 +1108,19 @@ NS.CleanBot_BuildGroupTab = function()
             (groupCtrl.paddingLeft or 0) - 16, -(NS.BOT_BAR_H + 2))
     end)
     classDropdown:Hide()
+    UIDropDownMenu_Initialize(classDropdown, function()
+        for _, class in ipairs(presentClasses) do
+            local info        = UIDropDownMenu_CreateInfo()
+            info.text         = NS.CB_ClassIconMarkup(class) .. " "
+                                .. ((NS.CLASS_DISPLAY and NS.CLASS_DISPLAY[class]) or class)
+            info.value        = class
+            info.notCheckable = true
+            local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+            if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+            info.func         = function() CB_SelectGroupClass(class) end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
 
     -- The generic content is built exactly once against the mutable group
     -- slot — selecting a group only swaps members and re-syncs, so changes

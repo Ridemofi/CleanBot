@@ -338,6 +338,10 @@ do
     -- a combat-strategy token — keep it in the parse map so a co? reply sets entry.combat.passive
     -- (the Commands-tab checkbox reads that for its state).
     NS.STRATEGY_MAP["passive"] = "passive"
+    -- Paladin/Priest healing rotations can be reported under their canonical names.
+    NS.STRATEGY_MAP["disc"] = "isHealer"
+    NS.STRATEGY_MAP["holy"] = "isHealer"
+    NS.STRATEGY_MAP["holy heal"] = "isHealer"
 end
 
 -- ============================================================

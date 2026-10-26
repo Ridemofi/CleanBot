@@ -20,11 +20,23 @@ NS.CleanBot_BuildIndividualTab = function()
 
     -- Bot selector dropdown — shown instead of the tab row when the group has more
     -- than NS.TAB_DROPDOWN_THRESHOLD bots (RefreshTabs toggles it). Created once,
-    -- hidden by default; populated per refresh in dropdown mode.
+    -- hidden by default; populated from the live roster when opened.
     NS.botDropdown = NS.CB_CreateDropdown(NS.botTabBar, "CleanBotBotDropdown", 180)
     NS.botDropdown:ClearAllPoints()
     NS.botDropdown:SetPoint("LEFT", NS.botTabBar, "LEFT", NS.PADDING.panel.left, 0)
     NS.botDropdown:Hide()
+    UIDropDownMenu_Initialize(NS.botDropdown, function()
+        for _, d in ipairs(NS.desiredBots) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text         = NS.CB_ClassIconMarkup(d.class) .. " " .. d.name
+            info.value        = d.key
+            info.notCheckable = true
+            local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.class]
+            if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
+            info.func = function() NS.CB_SelectBot(d.key) end
+            UIDropDownMenu_AddButton(info)
+        end
+    end)
 
     -- The XML-defined CleanBotFrameText is a child of CleanBotFrame and would
     -- bleed through across tabs. Hide it and use an individualPanel-parented label instead.
@@ -2028,21 +2040,6 @@ NS.CleanBot_RefreshTabs = function()
         -- lazily on selection (LRU-capped). Hide all tab buttons.
         for _, slot in ipairs(NS.tabPool) do slot.tabBtn:Hide() end
         if NS.botDropdown then
-            UIDropDownMenu_Initialize(NS.botDropdown, function()
-                for _, d in ipairs(NS.desiredBots) do
-                    local info = UIDropDownMenu_CreateInfo()
-                    -- Class icon (inline markup) + name; colorCode tints the name only
-                    -- (color codes don't affect the inline texture). Mirrors the Group
-                    -- tab's class-colored, icon-on-left select-list rows.
-                    info.text         = NS.CB_ClassIconMarkup(d.class) .. " " .. d.name
-                    info.value        = d.key
-                    info.notCheckable = true
-                    local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[d.class]
-                    if c then info.colorCode = string.format("|cff%02x%02x%02x", c.r * 255, c.g * 255, c.b * 255) end
-                    info.func = function() SelectBot(d.key) end
-                    UIDropDownMenu_AddButton(info)
-                end
-            end)
             NS.botDropdown:Show()
         end
     end

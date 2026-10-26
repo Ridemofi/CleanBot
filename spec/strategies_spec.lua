@@ -110,6 +110,28 @@ describe("Combat strategy defaults", function()
 end)
 
 describe("CB_StoreCombat reconcile", function()
+    it("recognizes Daywea's Discipline rotation without a literal heal token", function()
+        local entry = { class = "PRIEST" }
+        NS.CB_StoreCombat(entry, "Strategies: avoid aoe, boost, cast time, chat, cure, default, disc, dps assist, duel, dungeon clear combat, formation, potions, racials, save mana")
+        assert.is_true(entry.combat.isHealer)
+        assert.is_false(entry.combat.isTank)
+        assert.is_true(entry.combat.assistSingle)
+    end)
+
+    it("recognizes Peruadin's Holy rotation even when healer dps is active", function()
+        local entry = { class = "PALADIN" }
+        NS.CB_StoreCombat(entry, "Strategies: avoid aoe, bcast, boost, cast time, chat, cure, default, dps assist, duel, dungeon clear combat, follow, formation, healer dps, holy, potions, racials, save mana")
+        assert.is_true(entry.combat.isHealer)
+        assert.is_false(entry.combat.isTank)
+        NS.CB_StoreCombat(entry, "Strategies: dps, dps assist, cure")
+        assert.is_false(entry.combat.isHealer)
+    end)
+
+    it("distinguishes Holy healing from Holy damage and support strategies", function()
+        assert.is_true(NS.CB_ParseCombatStr("holy heal, dps assist").isHealer)
+        assert.is_false(NS.CB_ParseCombatStr("holy dps, healer dps, save mana, cure").isHealer)
+    end)
+
     it("replaces flags from the reply but carries numeric timer values across", function()
         local entry = { class = "WARRIOR", combat = { waitAttackTime = 7, focusFire = true } }
         NS.CB_StoreCombat(entry, "Strategies: cast time, boost")
