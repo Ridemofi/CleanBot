@@ -18,24 +18,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0   # full history so the changelog can diff against the previous tag
-
-      - name: Build changelog
-        run: |
-          CURRENT="${GITHUB_REF_NAME}"
-          # Nearest tag before this one (empty on the very first release).
-          PREV=$(git describe --tags --abbrev=0 "${CURRENT}^" 2>/dev/null || echo "")
-          if [ -n "$PREV" ]; then
-            echo "## Changes since ${PREV}" > CHANGELOG.md
-            RANGE="${PREV}..${CURRENT}"
-          else
-            echo "## Initial release" > CHANGELOG.md
-            RANGE="${CURRENT}"
-          fi
-          echo "" >> CHANGELOG.md
-          git log "$RANGE" --no-merges --pretty=format:'- %s (%h)' >> CHANGELOG.md
-          echo "" >> CHANGELOG.md
 
       - name: Stage addon files
         run: |
@@ -53,7 +35,7 @@ jobs:
             --exclude='docs' \
             --exclude='spec' \
             --exclude='dist' \
-            --exclude='CHANGELOG.md' \
+            --exclude='AGENTS.md' \
             --exclude='*.bat' \
             ./ dist/CleanBot/
 
@@ -68,5 +50,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: "CleanBot ${{ github.ref_name }}"
-          body_path: CHANGELOG.md
+          body: |
+            CleanBot ${{ github.ref_name }} release build.
+
+            Extract the attached archive directly into your `Interface/AddOns/` directory.
           files: CleanBot-${{ github.ref_name }}.zip
