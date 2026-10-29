@@ -1246,60 +1246,54 @@ NS.CB_BridgeCraftRecipeTarget = function(key, botName, skillId, spellId, targetB
     return true
 end
 
--- Performs the actual inventory fetch (sets the busy flag + sends). Runs from the serial
--- queue so it never overlaps another reply stream. Bridge path is instant; whisper path
--- streams the "items" reply, collected via invStaging and finalized on silence.
----@param key     string  Bot name-key (lowercased lookup key).
----@param botName string  Bot's display name (whisper/bridge target).
----@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
-local function CB_DoFetchInventory(key, botName, manual)
-    local entry = CleanBot_PartyBots[key]
-    if not entry then return end
-
-    -- Preserve existing inventory while the fresh fetch is in flight so the
-    -- frame can display stale-but-correct data instead of going blank.
-    entry.inventory = entry.inventory or { items = {} }
-
-    local useBridge = CB_EffectiveBridgeState() == "present"
-
-    -- In-flight flag drives the loading overlay AND the interaction lock; cleared in
-    -- CB_RenderInventory when data lands (or by the silence-timeout tick as a safety net).
-    entry.awaitingInventory = true
-    entry.invTimeout        = 0
-    entry.curItemSection    = nil    -- reset header-routed staging for the new collection
-    entry.invReplyArrived   = false  -- set true when the reply (header/item) actually lands
-
-    -- Overlay policy: always for a first (empty) load or manual refresh button click, but
-    -- for background auto-reconciles of an already-rendered grid only on the whisper path.
-    local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
-    entry.invOverlay = (manual == true) or (not (invF and invF.rendered)) or not useBridge
-    if invF and invF:IsShown() and entry.invOverlay and NS.CB_SetInventoryLoading then
-        NS.CB_SetInventoryLoading(invF, true)
-    end
-
-    if useBridge then
-        if NS.CB_FetchStats then
-            NS.CB_FetchStats(entry, true)
-        end
-        local token = CB_NextToken("exinv")
-        CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
-        return
-    end
-
-    -- invStaging is the whisper-path marker: its presence tells the tick to run the
-    -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
-    -- swapped into entry.inventory.items atomically once collection completes.
-    -- Raw send: this already runs from the queue (CB_FetchInventory enqueued it).
-    entry.invStaging = {}
-    CB_SendBotCommandRaw(botName, "items")
-end
-
--- Enqueues an inventory fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
+-- Enqueues an inventory fetch onto the bot's serial whisper queue (see CB_EnqueueRequest),
+-- so it never overlaps another reply stream. Bridge path is instant; whisper path streams
+-- the "items" reply, collected via invStaging and finalized on silence.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper/bridge target).
 ---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
 NS.CB_FetchInventory = function(key, botName, manual)
-    NS.CB_EnqueueRequest(key, function() CB_DoFetchInventory(key, botName, manual) end)
+    NS.CB_EnqueueRequest(key, function()
+        local entry = CleanBot_PartyBots[key]
+        if not entry then return end
+
+        -- Preserve existing inventory while the fresh fetch is in flight so the
+        -- frame can display stale-but-correct data instead of going blank.
+        entry.inventory = entry.inventory or { items = {} }
+
+        local useBridge = CB_EffectiveBridgeState() == "present"
+
+        -- In-flight flag drives the loading overlay AND the interaction lock; cleared in
+        -- CB_RenderInventory when data lands (or by the silence-timeout tick as a safety net).
+        entry.awaitingInventory = true
+        entry.invTimeout        = 0
+        entry.curItemSection    = nil    -- reset header-routed staging for the new collection
+        entry.invReplyArrived   = false  -- set true when the reply (header/item) actually lands
+
+        -- Overlay policy: always for a first (empty) load or manual refresh button click, but
+        -- for background auto-reconciles of an already-rendered grid only on the whisper path.
+        local invF = NS.botInventoryFrames and NS.botInventoryFrames[key]
+        entry.invOverlay = (manual == true) or (not (invF and invF.rendered)) or not useBridge
+        if invF and invF:IsShown() and entry.invOverlay and NS.CB_SetInventoryLoading then
+            NS.CB_SetInventoryLoading(invF, true)
+        end
+
+        if useBridge then
+            if NS.CB_FetchStats then
+                NS.CB_FetchStats(entry, true)
+            end
+            local token = CB_NextToken("exinv")
+            CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
+            return
+        end
+
+        -- invStaging is the whisper-path marker: its presence tells the tick to run the
+        -- whisper finalize (swap + stats fetch). Fresh replies are collected here and only
+        -- swapped into entry.inventory.items atomically once collection completes.
+        -- Raw send: this already runs from the queue.
+        entry.invStaging = {}
+        CB_SendBotCommandRaw(botName, "items")
+    end)
 end
 
 -- How long a fetched "stats" reply is considered fresh. Re-selecting a bot within this
@@ -1423,53 +1417,47 @@ end
 -- staging branch in CHAT_MSG_WHISPER and finalized by the silence tick. The reply
 -- carries no money/slot summary, so there is no stats fetch. Needs a banker NPC near
 -- the bot; otherwise the bot replies "Cannot find banker nearby" (handled as a popup).
--- Performs the actual bank fetch (sets the busy flag + sends "bank"). Runs from the serial
--- queue so the multi-line reply never overlaps another stream.
----@param key     string  Bot name-key (lowercased lookup key).
----@param botName string  Bot's display name (whisper target).
----@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
-local function CB_DoFetchBank(key, botName, manual)
-    local entry = CleanBot_PartyBots[key]
-    if not entry then return end
-
-    -- Preserve existing bank items while the fresh fetch is in flight (stale display).
-    entry.bank            = entry.bank or { items = {} }
-    entry.awaitingBank    = true
-    entry.bankTimeout     = 0
-    entry.curItemSection  = nil
-    entry.bankReplyArrived = false  -- set true when the reply (header/item) actually lands
-
-    local useBridge = CB_EffectiveBridgeState() == "present"
-    local bankF = NS.botBankFrames and NS.botBankFrames[key]
-    entry.bankOverlay = (manual == true) or (not (bankF and bankF.rendered)) or not useBridge
-    if bankF and bankF:IsShown() and entry.bankOverlay and NS.CB_SetInventoryLoading then
-        NS.CB_SetInventoryLoading(bankF, true)
-    end
-
-    if useBridge then
-        local token = CB_NextToken("bank")
-        NS.pendingBankRequests[token] = {
-            key = key,
-            botName = botName,
-            items = {},
-            expires = GetTime() + 2.5,
-            failed = false,
-        }
-        CB_SendBridge("GET~BANK~" .. botName .. "~" .. token)
-    else
-        -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
-        -- Raw send: this already runs from the queue (CB_FetchBank enqueued it).
-        entry.bankStaging = {}
-        CB_SendBotCommandRaw(botName, "bank")
-    end
-end
-
--- Enqueues a bank fetch onto the bot's serial whisper queue (see CB_EnqueueRequest).
+-- Enqueues a bank fetch onto the bot's serial whisper queue (see CB_EnqueueRequest), so the
+-- multi-line reply never overlaps another stream.
 ---@param key     string  Bot name-key (lowercased lookup key).
 ---@param botName string  Bot's display name (whisper target).
 ---@param manual  boolean? If true, forces the "Refreshing..." loading overlay (manual button click).
 NS.CB_FetchBank = function(key, botName, manual)
-    NS.CB_EnqueueRequest(key, function() CB_DoFetchBank(key, botName, manual) end)
+    NS.CB_EnqueueRequest(key, function()
+        local entry = CleanBot_PartyBots[key]
+        if not entry then return end
+
+        -- Preserve existing bank items while the fresh fetch is in flight (stale display).
+        entry.bank            = entry.bank or { items = {} }
+        entry.awaitingBank    = true
+        entry.bankTimeout     = 0
+        entry.curItemSection  = nil
+        entry.bankReplyArrived = false  -- set true when the reply (header/item) actually lands
+
+        local useBridge = CB_EffectiveBridgeState() == "present"
+        local bankF = NS.botBankFrames and NS.botBankFrames[key]
+        entry.bankOverlay = (manual == true) or (not (bankF and bankF.rendered)) or not useBridge
+        if bankF and bankF:IsShown() and entry.bankOverlay and NS.CB_SetInventoryLoading then
+            NS.CB_SetInventoryLoading(bankF, true)
+        end
+
+        if useBridge then
+            local token = CB_NextToken("bank")
+            NS.pendingBankRequests[token] = {
+                key = key,
+                botName = botName,
+                items = {},
+                expires = GetTime() + 2.5,
+                failed = false,
+            }
+            CB_SendBridge("GET~BANK~" .. botName .. "~" .. token)
+        else
+            -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
+            -- Raw send: this already runs from the queue.
+            entry.bankStaging = {}
+            CB_SendBotCommandRaw(botName, "bank")
+        end
+    end)
 end
 
 -- Debounced post-action reconcile. A burst of optimistic item moves (deposit/withdraw,
