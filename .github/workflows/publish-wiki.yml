@@ -92,7 +92,7 @@ jobs:
             [ "$printed" -eq 1 ] && printf '\n' >> "$sidebar"
           }
 
-          emit_section "User Guide" getting-started action-bar managing-bots bot-behavior gear-and-bags settings
+          emit_section "User Guide" getting-started action-bar managing-bots bot-behavior gear-and-bags professions spellbook settings
           emit_section "Reference"  playerbot-commands playerbot-strategies bridge-protocol debug-tools
 
           # Catch-all: any doc not placed under a heading above.

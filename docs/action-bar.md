@@ -1,7 +1,8 @@
 # Action Bar
 
 The Action Bar is a small floating bar of one-click bot commands you can keep on screen during
-play — no need to open the main window. Every button commands your **whole party/raid** at once.
+play — no need to open the main window. It lets you coordinate your party or raid with group-wide
+orders, recruit new bots, and dispatch role-specific commands.
 
 ## Showing & moving it
 
@@ -18,9 +19,9 @@ play — no need to open the main window. Every button commands your **whole par
 | **Attack** | Orders bots to attack your current target. |
 | **Pull** | Orders your **tank** bots to pull your target. |
 | **Passive** | Toggles bots between fighting and standing down. |
-| **Movement** | Sets how bots move: **Follow**, **Stay**, or **Runaway**. |
+| **Movement** | Sets how bots move: **Follow**, **Stay**, or **Run Away**. |
 | **Release** | **Release** a dead bot's spirit, or **Revive** it at the spirit healer. |
-| **Recruit** | Summons a new **level-matched** bot. Left-click for a fully random one, or hover to pick its class, role, and gender. |
+| **Recruit** | Summons a new bot **near your level**. Left-click for a fully random one, or hover to pick its class, role, and gender. |
 
 Some buttons are **flyouts** (Attack, Movement, Release, Recruit). A flyout button does its main
 action on **left-click**, and reveals more options when you **hover** it — or **right-click** to
@@ -34,12 +35,13 @@ to their previous combat movement when the fight ends.
 **Recruit** is a multi-level flyout for building a party on the fly (the same recruiting the
 [Dungeon Finder tab](managing-bots.md#recruit-from-the-dungeon-finder) does, without opening it):
 
-- **Left-click** the button → a random class/role/gender bot, matched to your level.
+- **Left-click** the button → a random class/role/gender bot, near your level.
 - **Hover** → a **class** list; clicking a class recruits it (random role & gender).
 - Hover a class → its valid **roles** (Tank/Healer/DPS); clicking recruits that class as that role.
 - Hover a role → **Male / Female**; clicking recruits that exact class, role, and gender.
 
-The recruited bot joins your party matched to your level, and is set to the role's spec on arrival.
+The recruited bot joins your party near your level, and is set to the role's spec on arrival.
+The server reinitializes it to your level when the difference exceeds three levels.
 It needs the server to allow recruiting (on by default), a free bot of that class, and level 55+
 for Death Knights — the same conditions as the Dungeon Finder tab.
 

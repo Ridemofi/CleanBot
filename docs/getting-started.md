@@ -7,10 +7,11 @@ drive your bots from a tidy window, a right-click menu, and an optional floating
 ## What you need
 
 - A 3.3.5a server running the **mod-playerbots** module (so you have bots to command).
-- **Optional — [MultiBot Bridge](bridge-protocol.md):** a small server module. When present,
-  CleanBot talks to your bots silently and syncs their data instantly. Without it, CleanBot
-  falls back to whispers — everything still works, just with more chat traffic (which you can
-  hide; see [Settings](settings.md) → *Hide Bot Chatter*).
+- **Optional — [MultiBot Bridge](bridge-protocol.md):** a small server module that provides
+  structured bot data and reduces command whispers. Some commands still use whispers with
+  the bridge installed. Most features also work without it, though Spellbook and Professions
+  require the bridge. You can hide command chatter in
+  [Settings](settings.md) → *Hide Bot Chatter*.
 - **Optional — ElvUI:** if you have it installed, CleanBot automatically matches its look.
 
 The companion *Multibot* addon is **not** required.
@@ -22,7 +23,7 @@ The companion *Multibot* addon is **not** required.
 
 The minimap button also: **right-click** to toggle the [Action Bar](action-bar.md),
 **shift + right-click** for the action bar's edit mode, and **drag** to move the button. Its
-tooltip shows your live bridge status (green = connected, red = whisper fallback).
+tooltip shows your live bridge status (green = present, red = absent).
 
 ## The four tabs
 
@@ -36,7 +37,7 @@ tooltip shows your live bridge status (green = connected, red = whisper fallback
 ## Managing your own character
 
 CleanBot can also run **your own character** as a bot. Turn on *Auto-Enable Self as Bot* in
-[Settings](settings.md) → Behavior and you'll spawn managed each login — handy for soloing with
+[Settings](settings.md) → Other → Behavior and you'll spawn managed each login — handy for soloing with
 a self-bot or testing without a group.
 
 ## Where to next
@@ -45,4 +46,6 @@ a self-bot or testing without a group.
 - [Managing Bots](managing-bots.md) — building and running your group.
 - [Bot Behavior](bot-behavior.md) — roles, rotations, movement, loot.
 - [Gear & Bags](gear-and-bags.md) — equipment, inventory, vendors, trading, quests.
+- [Professions](professions.md) — bot profession skills, recipes, crafting, and target enchantments.
+- [Spellbook](spellbook.md) — inspect learned spells and order manual casting.
 - [Settings](settings.md) — appearance and toggles.

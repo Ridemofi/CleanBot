@@ -6,8 +6,17 @@ recipes, filter recipes, and order bots to craft items or apply target enchantme
 ## Accessing Professions
 
 - Right-click a bot's unit frame or raid frame and select **Professions**.
-- Use the dropdown at the top of the professions window to switch between
-  multiple professions learned by the selected bot.
+- Click the engineering wrench button next to the spellbook and bag buttons on the **Individual**
+  tab's 3D model view.
+- Use the dropdown in the header to switch between party members without closing the window.
+- Use the vertical side tabs along the right edge to switch between learned primary and
+  secondary professions for the active bot.
+
+> [!NOTE]
+> Professions strictly requires the **MultiBot Bridge** server module (`GET~PROFESSION`,
+> `GET~PROFESSION_RECIPES`, `RUN~CRAFT_RECIPE`, `RUN~CRAFT_RECIPE_TARGET`). When the bridge is
+> absent, the Professions option is hidden from the right-click menu, and the paperdoll button
+> displays a *"Professions (Requires Bridge)"* tooltip indicating the requirement.
 
 ## Interface Overview
 
@@ -17,6 +26,11 @@ recipes, filter recipes, and order bots to craft items or apply target enchantme
   Categories can be collapsed or expanded by clicking on their headers.
 - **Recipe Details:** Displays the selected recipe's icon, name, difficulty,
   tool requirements, and reagent list with counts (available in bot bags vs required).
+- **Compact Layout:** Toggle between standard and compact views using the max/min button.
+  Compact mode uses profession-specific parchment backgrounds (craft cards) and resizes the recipe
+  list to conserve screen space.
+- **Sound Effects:** Native interface audio cues accompany window toggle, recipe selection,
+  and craft execution.
 
 ## Search and Filters
 
@@ -29,12 +43,12 @@ recipes, filter recipes, and order bots to craft items or apply target enchantme
 
 ## Crafting
 
-- **Standard Crafting:** Clicking **Create** dispatches `RUN~CRAFT_RECIPE` to the bot.
+- **Standard Crafting:** Clicking **Create** dispatches `RUN~CRAFT_RECIPE` to the bot for a single craft execution (which may produce multiple item units depending on the recipe yield). Queueing multiple iterations is not supported.
   CleanBot monitors the bot's casting state (`UNIT_SPELLCAST_SUCCEEDED`, `FAILED`,
   `INTERRUPTED`) and automatically refreshes reagent counts and skill progress upon completion.
 - **Target Enchantments:** For recipes that apply directly to equipment (e.g. Enchanting),
   clicking **Select Item** opens a picker displaying eligible targets organized into sections:
-  the bot's equipped gear slots, armor and weapons located in its inventory bags (bags 0–4),
+  the bot's equipped gear slots, armor and weapons located in its backpack and four inventory bags,
   and Enchanting Vellums. Non-enchantable slots (shirts, trinkets, relics, necks) are excluded.
   Selecting a target dispatches `RUN~CRAFT_RECIPE_TARGET`.
 

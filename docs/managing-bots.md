@@ -1,8 +1,8 @@
 # Managing Bots
 
 The **Manage** tab is where you build and run your group — bringing bots online, inviting them,
-summoning them, and saving them into reusable presets. Commands here apply to your whole
-party/raid.
+summoning them, and saving them into reusable presets. Each control targets the named bot,
+your current target, a preset, or your whole party/raid, as indicated.
 
 ## Bringing bots in and out
 
@@ -22,8 +22,9 @@ recruiter, then:
 2. Pick a **class** (and optionally a **gender** — Any picks at random).
 3. Click **Recruit**.
 
-A bot of that class joins your party **matching your level**, and CleanBot automatically sets it
-to a spec for the role you chose (e.g. Tank + Warrior → Protection). It needs the server to allow
+A bot of that class joins your party **near your level**, and CleanBot automatically sets it
+to a spec for the role you chose (e.g. Tank + Warrior → Protection). The server reinitializes it
+to your level when the difference exceeds three levels. It needs the server to allow
 the recruit command (on by default; some servers restrict it to GMs), there has to be a free bot
 of that class available, and Death Knights require you to be level 55+. If none can be summoned,
 the recruiter says so.
@@ -34,22 +35,24 @@ opening the Dungeon Finder.
 
 ## Party/Raid commands
 
-The **Party/Raid** section has buttons that broadcast to every bot at once — Summon, Eat &
-Drink, Revive, Release, Maintenance, set **Formation**, toggle **Passive**, and the gear actions
-(**Auto Gear**, **Auto-Equip**, **Roll**). The same command set appears on the
+The **Party/Raid** section has buttons that broadcast to every bot at once — Summon, Eat/Drink,
+Revive, Release, Maintenance, set **Formation**, toggle **Passive**, and the gear actions
+(**Auto Gear**, **Equip Upgrades**, **Roll**). The same command set appears on the
 [Individual and Group](bot-behavior.md) tabs when you want to target one bot or all of them
 deliberately.
 
-> **Auto Gear** re-gears a bot from scratch and asks for confirmation first, since it replaces
-> everything. **Auto-Equip** only swaps in upgrades it finds in the bot's bags.
+> **Auto Gear** equips auto-selected gear upgrades for the bot and asks for confirmation first to avoid unintended changes.
+> **Equip Upgrades** only swaps in upgrades it finds in the bot's bags (sends `equip upgrade`).
 
 ## Favorites & Presets
 
 Save named groups of bots and invite them in one click:
 
 - The **Favorites** preset is filled by the ★ star buttons on the [Individual](bot-behavior.md)
-  tab and can't be renamed or removed.
-- Create your own presets, add/remove bots, then **Invite Preset** to pull the whole roster in.
+  tab and is protected (cannot be renamed or removed).
+- **Preset controls:** **Add Preset**, **Rename Preset**, and **Remove Preset** manage your saved lists.
+- **Bot entries:** **Add Bot**, **Rename Bot**, and **Remove Bot** edit the selected preset's membership.
+- **Inviting:** Click **Invite Preset** to pull the whole roster in, or select an individual entry and click **Invite Bot**.
 
 ## Altbots (linking other accounts)
 
@@ -70,3 +73,6 @@ Right-click any bot in your **party/raid frames** for quick actions without open
 - **Manage** — jump to that bot on the Individual tab.
 - **Inventory** — open its [bags](gear-and-bags.md).
 - **Quest Log** — open its [quests](gear-and-bags.md).
+- **Professions** — open its [professions and crafting](professions.md) window (requires MultiBot Bridge; hidden if absent).
+- **Spellbook** — open its [spellbook](spellbook.md) (requires MultiBot Bridge; hidden if absent). Left-clicking a spell casts it on your current target
+  (or the bot if no enemy/friendly target is selected); right-clicking casts it on yourself.

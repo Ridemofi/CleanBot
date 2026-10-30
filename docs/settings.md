@@ -15,7 +15,8 @@ If you have **ElvUI** installed, CleanBot automatically matches its skin — no 
 ## Layout
 
 Fine-grained spacing controls (the padding and margins around panels, headers, buttons, and
-other widgets), with a **Show Sample Layout** preview. Changes apply live. This is purely
+other widgets), with a **Show Sample Layout** preview. Changes stay pending until you click
+**Apply**. This is purely
 cosmetic — leave it alone unless you want to tweak the spacing.
 
 ## Other
@@ -33,8 +34,17 @@ cosmetic — leave it alone unless you want to tweak the spacing.
 ### Dungeon Finder
 
 - **Show Recruiter Tab** — attaches a bot-recruiter tab to the Dungeon Finder window for summoning
-  a level-matched bot by role and class. See
+  a bot near your level by role and class. See
   [Managing Bots](managing-bots.md#recruit-from-the-dungeon-finder).
+
+### Quest Rewards
+
+- **Enable Bot Quest Reward Selection** — opens an interactive side panel during quest turn-in
+  allowing you to choose rewards for your **altbots** (your characters used as bots, including
+  those from linked accounts). Requires `Playerbots.AutoPickReward = no` in the server's
+  `playerbots.conf`; with `yes`, altbots auto-pick rewards.
+  Server-generated random bots continue to auto-pick rewards normally: setting this option
+  to `no` does **not** make them wait for your selection.
 
 ### Action Bar
 

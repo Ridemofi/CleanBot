@@ -31,7 +31,7 @@ below). There are two registries:
      `talents`, `quests`, `stats`, `drop`, `emote`, `wait for attack time`, `ll`, `repair`, …).
 
 A whisper that matches **no** trigger falls through to an item-mention auto-trade
-(`AiPlayerbot.EnableAutoTradeOnItemMention`, default **1**): the text is fed to the `c` and `t`
+(`Playerbots.EnableAutoTradeOnItemMention`, default **true**): the text is fed to the `c` and `t`
 (trade) actions, so any item link or quality keyword in it makes the bot **open a trade**. That
 is exactly why `sell gray` (no `sell` trigger) opened a trade on the `gray` keyword instead of
 vendor-selling — and it's also the *only* reason our `give <link>` works (there is no `give`
@@ -52,15 +52,15 @@ action name in `ChatActionContext.h`.**
 | `stats` | `stats` | `supported` | ✅ |
 | `drop <quest>` | `drop` | `supported` | ✅ |
 | `emote wave` | `emote` | `supported` | ✅ |
-| `wait for attack time <N>` | `wait for attack time` | `supported` | ✅ |
-| `e <link>` / `ue <link>` / `u <link>` | `e` / `ue` / `u` | `TriggerNode(...)` | ✅ |
+| `wait for attack time <N>` (0–99) | `wait for attack time` | `supported` | ✅ |
+| `e <link>` / `ue <link>` / `u <link>` / `destroy <link>` | `e` / `ue` / `u` / `destroy` | `TriggerNode(...)` / `DestroyItemAction` | ✅ |
 | `s gray` | `s` | `TriggerNode("s")` → sell | ✅ (was `sell gray` — wrong, fixed) |
 | `t <link>` (drag-to-trade) | `t` | `TriggerNode("t")` → trade | ✅ (was `give <link>` — relied on the auto-trade fallback; now the real `t` command) |
 | `bank` / `bank <link>` / `bank -<link>` | `bank` | `ChatTriggerContext` `creators["bank"]` | ✅ (list / deposit / withdraw — see Bank below) |
 | `formation <name>` | `formation` | `supported` | ✅ (Commands tab + Manage Party/Raid — see "Commands already sends") |
 | `autogear` | `autogear` | `supported` | ✅ ("Auto Gear" button — see "Commands already sends") |
 | `ll <mode>` / `ll ?` | `ll` | `supported` | ✅ ("Loot Quality" dropdown, Non-Combat tab — see "Commands already sends") |
-| `equip upgrade` | `equip upgrade` | `supported` | ✅ ("Auto-Equip" button — see "Commands already sends") |
+| `equip upgrade` | `equip upgrade` | `supported` | ✅ ("Equip Upgrades" button — see "Commands already sends") |
 | `roll` | `roll` | `supported` | ✅ ("Roll" button — see "Commands already sends") |
 | `summon` | `summon` | `supported` | ✅ (Action Bar "Summon" button + unit right-click menu) |
 | `do attack my target` (+`@tank`/`@heal`/`@dps`/`@melee`/`@ranged`) | `do` | `PlayerbotAI::HandleCommand` — `do <action>` → `DoSpecificAction` | ✅ (Action Bar "Attack" flyout) |
@@ -69,8 +69,11 @@ action name in `ChatActionContext.h`.**
 | `revive` | `revive` | `TriggerNode("revive")` → `spirit healer` action | ✅ (Action Bar "Release" flyout) |
 | `b <link>` | `b` | `TriggerNode("b")` → buy (`BuyAction`) | ✅ (vendor extension — a selected bot buys the right-clicked merchant item) |
 | `s <link>` | `s` | `TriggerNode("s")` → sell (`SellAction`) | ✅ (vendor extension + inventory "Sell" menu) |
-| `guild bank <link>` | `guild bank` | `GuildBankAction` (deposit only) | ✅ (inventory "Deposit to Guild Bank" menu — deposit-only, no list/withdraw) |
-| `cast 13262 <link>` | `cast` | `CastCustomSpellAction` (`cast <spell> [target]`) | ✅ (inventory "Disenchant" menu — triggers spell 13262 Disenchant on target item link) |
+| `gb <link>` | `gb` | `GuildBankAction` (deposit only) | ✅ (inventory "Deposit to Guild Bank" fallback — core trigger is `gb`; deposit-only, no list/withdraw) |
+| `cast <spell> [on <target>]` / `cast 13262 <link>` | `cast` | `CastCustomSpellAction` (`cast <spell> [target]`) | ✅ (Spellbook dual-click casting and inventory "Disenchant" menu) |
+| `r <link>` | `r` | `TriggerNode("r")` — reward (`RewardAction`) | ✅ (quest reward picker — completes quest choosing reward itemlink) |
+| `los gos` | `los` | `TriggerNode("los")` — line of sight objects | ✅ (whisper fallback for nearby interactive game objects query) |
+| `reset botAI` | `reset botAI` | `supported` (`ResetAiAction`) | ✅ ("Reset Strategies" button — clears saved AI settings and restores strategy defaults from Individual tab) |
 
 ---
 
@@ -84,10 +87,10 @@ action name in `ChatActionContext.h`.**
 | `talents spec list` | ✅ | Populates the premade-spec dropdown; reply is one premade per line, `"1. arms pve (51-0-20)"` (parsed in `Bridge.lua`). |
 | `s gray` | ✅ | Inventory "Sell Trash" button. **The trigger is `s`, not `sell`** — `ChatCommandHandlerStrategy` registers `TriggerNode("s") → SellAction`; there is NO `sell` trigger. Whispering `sell gray` matches no command and (with `enableAutoTradeOnItemMention`) makes the bot open a *trade* on the "gray" keyword instead of vendor-selling. Bridge `SELL_GREY` (`RUN~ITEM_ACTION~<bot>~<token>~SELL_GREY~0~0`, cap `INVENTORY_BULK_SELL_V1`) when present, whisper only when absent; sells only when a vendor NPC is in interaction range; "gray" = `ITEM_QUALITY_POOR` (quality 0). Params: `s gray` / `s *` / `s vendor` / `s <itemlink>`. |
 | `b <link>` (vendor buy) | ✅ | **Vendor frame extension** (`Merchant.lua`). With a bot selected on the vendor's portrait tabs/dropdown, right-clicking a merchant item sends `b <itemlink>` so that bot buys it. Trigger `b` (`BuyAction`); whisper-only (not bridge-allowlisted); the bot must be within interaction range of the vendor — CleanBot does a client-side proxy range check (`CheckInteractDistance` to the bot, since the player is at the vendor) and flashes a `UIErrorsFrame` warning instead of sending if it's too far. |
-| `s <link>` (vendor sell) | ✅ | Vendor-sells a single item from a bot's bags. Used by the **vendor extension** (right-click an item in a bot's open bag window while a merchant is up) and the inventory **"Sell"** context-menu entry. Uncommon-or-better items confirm first (bots have **no buyback**). Trigger `s` (`SellAction`); bridge single-sell (`RUN~ITEM_SELL`, cap `ITEM_SELL_SINGLE_V1`) when present with exact coordinates, whisper only when absent; needs a vendor in range. (Bulk `s gray` is the separate "Sell Trash" button above.) |
-| `guild bank <link>` (deposit) | ✅ | Deposits one bag item into **guild-bank tab 0**. Used by the inventory **"Deposit to Guild Bank"** context-menu entry. `GuildBankAction`; bridge deposit (`RUN~ITEM_DEPOSIT_EXACT GBANK_DEPOSIT`, `Bridge.lua:1335-1344` + `Inventory.lua:230-232`) when bridge is present with exact bag/slot coordinates, whisper `guild bank <link>` only when absent. **Deposit-only** — the server can't list or withdraw a bot's guild bank, and the guild bank is shared guild-wide, so there is no grid to mirror. Requires the bot in **your guild**, at a **guild vault**, with **deposit rights** for the first tab; failures raise the `CLEANBOT_NO_GUILD_BANK` popup. |
+| `s <link>` (vendor sell) | ✅ | Vendor-sells a single item from a bot's bags. Used by the **vendor extension** (right-click an item in a bot's open bag window while a merchant is up) and the inventory **"Sell"** context-menu entry. Uncommon-or-better items confirm first (CleanBot currently provides **no buyback for bots**). Trigger `s` (`SellAction`); bridge single-sell (`RUN~ITEM_SELL`, cap `ITEM_SELL_SINGLE_V1`) when present with exact coordinates, whisper only when absent; needs a vendor in range. (Bulk `s gray` is the separate "Sell Trash" button above.) |
+| `gb <link>` (deposit) | ✅ | Deposits a bag item into the guild bank. Used by the inventory **"Deposit to Guild Bank"** context-menu entry. `GuildBankAction`; bridge deposit (`RUN~ITEM_DEPOSIT_EXACT GBANK_DEPOSIT`, `CB_BridgeDepositItem` + the inventory context menu) when bridge is present with exact bag/slot coordinates, whisper fallback `gb <link>` (core trigger `gb`) when absent. The chat `gb` action deposits into tab 0. The bridge deposit path tries tabs where both requester and bot have deposit rights. The bridge also supports `GET~GBANK` and `ITEM_ACTION GBANK_WITHDRAW`, but CleanBot currently exposes no guild-bank browsing or withdrawal window. Requires the bot in **your guild**, at a **guild vault**, with **deposit rights** (tab 0 for the chat path); failures raise the `CLEANBOT_NO_GUILD_BANK` popup. |
 | `e <link>` (equip) | ⚠️ | Resolves via `parseItems` — accepts far more than links. Bridge `RUN~ITEM_EQUIP` when present with exact coordinates, whisper only when absent. |
-| `ue <link>` (unequip) | ✅ | Always whisper, no bridge opcode. |
+| `ue <link>` (unequip) | ✅ | CleanBot always sends this through whispers. The server also provides `RUN~ITEM_UNEQUIP`, which CleanBot does not currently use. |
 | `u <link>` (use item) | ✅ | Bridge `RUN~ITEM_USE` when present with exact coordinates, whisper only when absent. |
 | `t <link>` | ✅ | Trade command (`TriggerNode("t")` → `TradeAction`); always whisper, no bridge opcode. Toggles the item in the bot's trade window. Used by the drag-to-trade / right-click-remove flow. (We previously sent `give <link>`, which is **not** a real command and only worked via the item-mention auto-trade fallback — switched to `t` for robustness.) |
 | `items` | ⚠️ | Accepts filters (`items quest`, `items food`, by quality/name/slot). |
@@ -96,15 +99,19 @@ action name in `ChatActionContext.h`.**
 | `stats` | ✅ | Routes via bridge `GET~STATS` when present; whispers only when absent. Rest-XP overlay is hidden for 1:1 visual consistency. |
 | `drop <questname>` | ✅ | Abandon quest. |
 | `emote <name>` | ✅ | Takes any emote token; CleanBot sends `emote wave` on bot selection (Settings-gated). |
-| `autogear` | ✅ | "Auto Gear" button in the "Commands" inner tab (Individual + Group) and Manage → Party/Raid, **gated behind a Yes/No confirmation popup** (destructive: replaces all equipment). Auto-equips a fresh gear set for the bot. **Arguments — the `supported` vector registers exactly two forms** (each a distinct action class), so these are the *only* recognized forms: `autogear` (no args → `AutoGearAction`, what the button sends) and `autogear bis` (→ `BisGearAction`, best-in-slot). `autogear` takes no further arguments. (Related but separate: `equip upgrade` equips inventory upgrades only.) Whisper-only (not bridge-allowlisted); reply hidden by the reply window. Per-host scope matches the rest of the set: Individual → open bot; Group → selected members (fan-out); Manage → whole party/raid broadcast. NOTE: `AutoGearAction`/`BisGearAction` are bundled in an unpinned header, so the precise gear source/level of plain `autogear` vs `bis` is unverified from source — confirm in-game. |
-| `formation <name>` | ✅ | "Commands" inner tab (Individual + Group) and Manage → Party/Raid. Sets the bot's movement formation (`SetFormationAction`, `src/Ai/Base/Value/Formations.cpp`; trigger `formation` in the `supported` vector). Routes group formation change via bridge `RUN~FORMATION~GROUP~~<token>~<formation>` when bridge is present (for the 8 supported tokens); `far` and absent fallback to `PARTY`/`RAID` chat broadcast. Individual bot formation changes whisper directly. Valid tokens (lowercase): `chaos` (default), `near`, `queue`, `circle`, `line`, `shield`, `arrow`, `melee`, `far` — the dropdown shows them title-cased and sends the lowercase token. **Query:** When bridge is present, queries via `GET~FORMATIONS~GROUP~~<token>` (batching all group bots in one roundtrip); whispers `formation ?` only when absent. Parsed in `Bridge.lua` into `entry.formation` and reflected in dropdowns. |
-| `ll <mode>` / `ll ?` | ✅ | "Loot Quality" dropdown (Non-Combat tab, Individual + Group). `LootStrategyAction` (modes in `src/Ai/Base/Value/LootStrategyValue.h`); trigger `ll` in `supported`. The bot's loot-quality policy — exclusive, one strategy at a time. **Default: `normal`** (`LootStrategyValue` is a `ManualSetValue<LootStrategy*>` seeded with `normal`). Modes (verified from each strategy's `CanLoot()` in `LootStrategyValue.cpp` + `ItemUsageValue::Calculate`): **`normal`** = items with a non-`NONE` `ItemUsage` — note a gray item with a sell price resolves to `ITEM_USAGE_VENDOR`, so **`normal` DOES loot gray vendor-trash**; it skips only truly no-value items; **`gray`** = `normal` **+** all poor-quality items (incl. zero-sell-value grays `normal` skips); **`all`** = everything (`CanLoot` returns true); **`disenchant`** = `normal` **+** uncommon-or-better, non-bind-on-pickup weapons/armor (disenchantable). **Query:** `ll ?` whispers back `Loot strategy: <mode>` (plus an `Always loot items: …` list), parsed in `Bridge.lua` into `entry.lootStrategy` and reflected in the dropdown (Group shows "Mixed" when members differ). Modeled like `formation` (a `?`-queried command **setting**, not an `nc` strategy) — a `type="settingDropdown"` group in `NS.NC_STRATEGIES`. `ll all/normal/gray/quest/skill` via bridge `RUN~LOOT` when present; `ll ?`, `ll disenchant`, `ll <itemlink>` always whisper; per-host scope: Individual → open bot, Group → selected members (fan-out). `ll <itemlink>` / `ll -<itemlink>` manage a per-item **always-loot list** — *not surfaced*. (`loot`, the auto-loot on/off strategy, is the separate "Auto Loot" `nc` checkbox.) |
-| `equip upgrade` | ✅ | "Auto-Equip" button (Commands inner tab + Manage → Party/Raid). `EquipUpgradeAction`; trigger `equip upgrade` in `supported`. Scans the bot's bags and equips stat **upgrades** — non-destructive (only swaps in improvements), so **no confirmation**, unlike `autogear` (which re-gears wholesale). Whisper-only; per-host scope matches the rest of the command set. |
-| `roll` | ✅ | "Roll" button (Commands inner tab + Manage → Party/Raid). `LootRollAction`; trigger `roll` in `supported`. **Bare `roll` → `bot->DoRandomRoll(0,100)`** — the bot does a `/random 0-100` (e.g. for manual loot distribution). `roll <itemlink>` instead makes an item-usage need/greed decision on that item — *not surfaced* (the button sends bare `roll`). Whisper-only. |
+| `autogear` | ✅ | "Auto Gear" button in the "Commands" inner tab (Individual + Group) and Manage → Party/Raid, **gated behind a Yes/No confirmation popup**. Auto-equips gear upgrades for the bot. In C++ (`TrainerAction.cpp:586-710`), `autogear` supports multiple parameters: `autogear` (upgrades equipped gear incrementally; does not wipe existing gear), `autogear reset` (erases all equipped gear and re-gears from scratch), `autogear match` (targets master's average ilvl, capped by `AutoGearScoreLimit` config, though item availability does not guarantee an exact match), `autogear <quality>`, `autogear <ilvl>`, `autogear reset <quality|ilvl>`, and `autogear bis [ilvl]`. (Related but separate: `equip upgrade` equips inventory upgrades only.) Whisper-only (not bridge-allowlisted); reply hidden by the reply window. Per-host scope matches the rest of the set: Individual → open bot; Group → selected members (fan-out); Manage → whole party/raid broadcast. |
+| `formation <name>` | ✅ | "Commands" inner tab (Individual + Group) and Manage → Party/Raid. Sets the bot's movement formation (`SetFormationAction`, `src/Ai/Base/Value/Formations.cpp`; trigger `formation` in the `supported` vector). Routes group formation change via bridge `RUN~FORMATION~GROUP~~<token>~<formation>` when bridge is present (for the 8 tokens in CleanBot's current allowlist); the server also accepts `far`, but CleanBot currently sends `far` and bridge-absent orders through `PARTY`/`RAID` chat. Individual bot formation changes whisper directly. Valid tokens (lowercase): `chaos` (default), `near`, `queue`, `circle`, `line`, `shield`, `arrow`, `melee`, `far` — the dropdown shows them title-cased and sends the lowercase token. **Query:** When bridge is present, queries via `GET~FORMATIONS~GROUP~~<token>` (batching all group bots in one roundtrip); whispers `formation ?` only when absent. Parsed in `Bridge.lua` into `entry.formation` and reflected in dropdowns. |
+| `ll <mode>` / `ll ?` | ✅ | "Loot Quality" dropdown (Non-Combat tab, Individual + Group). `LootStrategyAction` (modes in `src/Ai/Base/Value/LootStrategyValue.h`); trigger `ll` in `supported`. The bot's loot-quality policy — exclusive, one strategy at a time. **Default: `normal`** (`LootStrategyValue` is a `ManualSetValue<LootStrategy*>` seeded with `normal`). Modes (verified from each strategy's `CanLoot()` in `LootStrategyValue.cpp` + `ItemUsageValue::Calculate`): **`normal`** = items with a non-`NONE` `ItemUsage` — note a gray item with a sell price resolves to `ITEM_USAGE_VENDOR`, so **`normal` DOES loot gray vendor-trash**; it skips only truly no-value items; **`gray`** = `normal` **+** all poor-quality items (incl. zero-sell-value grays `normal` skips); **`all`** = everything (`CanLoot` returns true); **`disenchant`** = `normal` **+** uncommon-or-better, non-bind-on-pickup weapons/armor (disenchantable). **Query:** `ll ?` whispers back `Loot strategy: <mode>` (plus an `Always loot items: …` list), parsed in `Bridge.lua` into `entry.lootStrategy` and reflected in the dropdown (Group shows "Mixed" when members differ). Modeled like `formation` (a `?`-queried command **setting**, not an `nc` strategy) — a `type="settingDropdown"` group in `NS.NC_STRATEGIES`. `ll all/normal/gray/disenchant` via bridge `RUN~LOOT` when present; `ll ?`, `ll <itemlink>` always whisper; per-host scope: Individual → open bot, Group → selected members (fan-out). `ll <itemlink>` / `ll -<itemlink>` manage a per-item **always-loot list** — *not surfaced*. (`loot`, the auto-loot on/off strategy, is the separate "Auto Loot" `nc` checkbox.) |
+| `equip upgrade` | ✅ | "Equip Upgrades" button (Commands inner tab + Manage → Party/Raid). `EquipUpgradeAction`; trigger `equip upgrade` in `supported`. Scans the bot's bags and equips stat **upgrades** — only swaps in improvements, so **no confirmation** is required. Whisper-only; per-host scope matches the rest of the command set. |
+| `roll` | ✅ | "Roll" button (Commands inner tab + Manage → Party/Raid). Handled by `RollAction` (`src/Ai/Base/Actions/LootRollAction.cpp`, registered in `ChatActionContext.h`); trigger `roll` in `supported`. **Bare `roll` → `bot->DoRandomRoll(1,100)`** — the bot does a `/random 1-100` (e.g. for manual loot distribution). `roll <itemlink>` performs a `/random 1-100` roll if the linked item is usable weapons or armor (`ITEM_USAGE_EQUIP / REPLACE / BAD_EQUIP`) — not a group loot popup decision, and *not surfaced* in CleanBot (the button sends bare `roll`). Whisper-only. |
 | `summon` | ✅ | **Action Bar "Summon" button** (+ the unit right-click menu's "Summon", `UnitMenu.lua`). `summon` is in `supported` (`SummonAction`) — teleports the bot to you. The Action Bar path broadcasts via `CB_SendGroupCommand` (whole group); the unit-menu path whispers a single bot. Whisper-only (not bridge-allowlisted). |
 | `do attack my target` | ✅ | **Action Bar "Attack" flyout.** Uses the `do <action>` command (`PlayerbotAI::HandleCommand` strips `do `/`d ` and calls `DoSpecificAction`), which force-runs a named action directly, bypassing trigger relevance — here the `attack my target` action (the same action the bare `attack` and tank-only `tank attack` triggers map to). The flyout's role variants prepend an `@` qualifier: the base = **no `@`** (whole group), then `@tank` / `@heal` / `@dps` / `@melee` / `@ranged`. Broadcast to the group (`CB_SendGroupCommand` → PARTY/RAID), so one message reaches every bot and the `@` filter (see "Command targeting") selects who reacts. Whisper-only path is never taken (group broadcast). |
-| `pull my target` | ✅ | **Action Bar "Pull" button.** `TriggerNode("pull")` → `pull my target` action. The bot's class `pull` strategy + PullMultiplier drive the actual pull (auto-selects the equipped ranged-weapon shot; PullMultiplier vetoes everything else mid-pull) — see playerbot-strategies.md. `pull` is **class-gated** (no Hunter/Shaman `pull` token — see the class matrix), so only bots that registered it react. Broadcast via `CB_SendGroupCommand`. (`pull back` and `pull rti` triggers also map to pull actions — unused; the `RTI` opcode's `pull rti target` is allowlist plumbing only.) |
+| `pull my target` | ✅ | **Action Bar "Pull" button.** `TriggerNode("pull")` → `pull my target` action. The bot's class `pull` strategy + PullMultiplier drive the actual pull (auto-selects the equipped ranged-weapon shot; PullMultiplier allows pull actions, `follow`, and `set facing`, and vetoes other actions mid-pull). **Role-restricted in C++ (`PullActions.cpp:47`):** only bots identified as tanks (`PlayerbotAI::IsTank(bot)`) execute the pull; non-tanks return false immediately. Broadcast via `CB_SendGroupCommand`. |
 | `release` / `revive` | ✅ | **Action Bar "Release" flyout** — death-state control. `release` (`supported`; `ReleaseSpiritAction`) releases a dead bot's spirit (it becomes a ghost). `revive` (`TriggerNode("revive")` → the **`spirit healer`** action — *not* `ReviveFromCorpseAction`) brings a released bot back at the nearest spirit healer. Both broadcast via `CB_SendGroupCommand`. |
+| `cast <spell> [on <target>]` / `cast 13262 <link>` | ✅ | Dispatched for Spellbook dual-click casting and inventory disenchanting (`CastCustomSpellAction`). |
+| `r <link>` | ✅ | Quest reward picker (`RewardAction`). Sends itemlink of the chosen reward on turn-in. |
+| `los gos` | ✅ | Whisper fallback for querying nearby interactive game objects (`TellLosAction`). |
+| `reset botAI` | ✅ | "Reset Strategies" button on Individual tab header (`ResetAiAction`). Clears saved repository settings and rebuilds combat/non-combat/dead strategy sets from the server defaults. It does not explicitly reset the current context's formation or saved movement positions. Bare whisper `reset` instead runs `PlayerbotAI::Reset(true)`, which cancels logout, stops movement and spellcasting, and resets reactions, targets, travel, and action engines while **preserving** current strategies. |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)
 Prefix operators on each strategy token:
@@ -114,6 +121,9 @@ Prefix operators on each strategy token:
 - `!`     — **reset all** strategies for that state (`SelectiveResetStrategies`) — *unused; good "reset" button*
 - `?`     — query active strategies (the reply CleanBot already parses)
 
+The server also registers `de …` to edit dead-state strategies
+(`ChangeDeadStrategyAction`); CleanBot's strategy controls expose `co` and `nc` only.
+
 Strategy *names* are hardcoded in `Individual/ClassData.lua`/`Individual/Strategies.lua`. The `help` command
 returns the live list via `GetSupportedStrategies()` if dynamic discovery is ever wanted.
 The full strategy reference — what each token does, per-class coverage, and known
@@ -122,10 +132,12 @@ conflicts — lives in [playerbot-strategies.md](playerbot-strategies.md).
 ### Command targeting — `@` qualifiers (`src/Bot/Cmd/ChatFilter.cpp`)
 
 A command may lead with one or more `@…` qualifiers that restrict **which** of your bots react,
-e.g. `@tank co +passive`, `@melee @warrior s gray`. Source: `CompositeChatFilter` runs each filter
+e.g. `@tank co +passive`, `@warrior @melee s gray`. Source: `CompositeChatFilter` runs each filter
 in turn — a filter returns `""` (this bot ignores the command) or strips its leading `@token ` and
-passes the rest on. So qualifiers **chain (logical AND)**, and they apply to **whispers and
-party/raid chat alike** (the filter runs in `PlayerbotAI::HandleCommand` for every channel).
+passes the rest on. They apply to **whispers and party/raid chat alike** (the filter runs in
+`PlayerbotAI::HandleCommand` for every channel). Chaining is order-sensitive: the composite
+visits strategy, class, RTI, combat type, level, subgroup, spec, aura, and aggro filters once
+in that order. A qualifier left after its filter has run is not revisited.
 
 The role checks `IsTank`/`IsHeal`/`IsDps` default to `bySpec=false`, which reads
 `ContainsStrategy(STRATEGY_TYPE_*)` — the bot's **active strategy**, not its talent spec.
@@ -161,12 +173,12 @@ Usage string from source:
 - `talents` (no args) — reports current spec — *unused*
 - `talents switch 1` / `2` — dual-spec switch — *unused*
 - `talents autopick` — auto-assign talents — *unused*
-- `talents spec list` — query available spec names — ✅ used (premade-spec dropdown; fetched once per class per session, finalized on reply silence)
+- `talents spec list` — query available spec names — ✅ used (premade-spec dropdown; fetched once per class per session; finalized by `TALENT_SPEC_END` through the bridge or reply silence through chat)
 - `talents spec <name>` — set a named spec — ✅ used
 - `talents apply <link>` — apply a full build from a talent-calculator link — *unused*
 
 ### parseItems (`InventoryAction.cpp`)
-The `e` / `u` / `ue` / `give` / `items` commands all resolve targets through `parseItems`,
+The `e` / `u` / `ue` / `t` / `items` commands resolve item arguments through `parseItems`,
 which accepts: item links, item IDs, item **names** (free-text), equipment **slot numbers**,
 item **quality**, item class/subclass, saved **outfit names**, the count suffix `usage <n>`,
 and the keywords `ammo`, `food`, `drink`, `mount`, `pet`, `recipe`, `quest`,
@@ -188,39 +200,40 @@ repair cost and rest-XP are present but unused.
 2. **`outfit`** (`OutfitAction.cpp`) — named gear sets. `outfit <name> +[item]` / `-[item]`
    to build, `outfit <name> equip` / `replace`, `outfit <name> update` (snapshot current
    gear), `outfit <name> reset`, `outfit ?` to list. Pairs with the equip/paperdoll panel.
-3. **`reward <link>`** (`RewardAction.cpp`) — turn in a completed quest choosing that reward
-   item (one link per call; no `reward all`). Pairs with the quest panel's reward display.
-4. **`repair` / `repair all`** (`RepairAllAction`) — send a bot to repair. Companion to the
-   durability `stats` already reports.
-5. **`reset`** (`ResetAiAction`) — reset the bot's AI/strategies (stronger than `co !`).
-6. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
+3. **`repair`** (`RepairAllAction`) — send a bot to repair. While `repair all` is not a distinct trigger in C++, typing `repair all` passes `"all"` as a parameter that `RepairAllAction` completely ignores, so it functions identically to `repair`. Companion to the durability `stats` already reports.
+4. **`go <arg>`** (`GoAction.cpp`) — parameterized movement (see the `go` subsection below).
    Most relevant form: **`go <unit name>` walks the bot to a nearby matching NPC/player by
    name** — e.g. stepping a bot onto a **banker** so the `bank` commands pass their proximity
    check. (Bounded by the bot's search range — it's the last-leg positioner, not a long-haul
    travel; pair with `summon`/`follow` to get the bot into the area first.)
-7. **Movement one-shot triggers:** `follow`, `stay`, `guard`, `flee`, `sit`, `return`, `runaway`
-   (TriggerNodes → `"<name> chat shortcut"`). **Unused by CleanBot** — the Action Bar's Movement
+5. **Movement chat shortcuts:** `follow`, `stay`, `flee`, `runaway`
+   (TriggerNodes → `"<name> chat shortcut"`). `guard`, `sit`, and `return` are strategy/action
+   names, not registered chat shortcuts in the source reviewed. **Unused by CleanBot** — the Action Bar's Movement
    flyout (Follow / Stay / Runaway) instead drives the *persistent* **movement strategies** via
-   `co`/`nc` (the exclusive movement group), not these one-shot shortcuts. Note `flee` ≠ `runaway`:
-   `flee` (`FleeAction`) is a single `MoveAway` straight from the current target and only fires when
-   that target is in **melee range**; `runaway` (`RunAwayAction` → `Flee`) repositions near a friendly
-   or to `FleeManager`'s optimal max-distance point. Both are one `MoveTo` per call (no loop) — see
+   `co`/`nc` (the exclusive movement group), not these chat shortcuts. Note `flee` ≠ `runaway`:
+   the `flee` shortcut applies `+follow,-stay,+passive` in both states, while the `runaway`
+   shortcut enables the `runaway` movement strategy. The internal actions are separate:
+   `FleeAction` uses `MoveAway` when the current target is in **melee range**;
+   `RunAwayAction` calls `Flee`, which repositions near a friendly or uses `FleeManager`.
+   Those internal actions perform one movement per call (no loop) — see
    `playerbot-strategies.md` → "Movement modes" for the source-verified breakdown.
+6. **`stance`** (`Stances.cpp:240–280`) — bot combat posture and positioning: `stance ?` (queries current stance), `stance show` (places a map ping at calculated position), or `stance near|tank|turnback|behind`.
 
 ### Lower priority / situational
-`mail` / `send mail` / `check mail`, `taxi`, info queries `position` / `los` /
+`mail` / `sendmail`, `taxi`, info queries `position` / `los` /
 `reputation` / `emblems`, pet management
-(`pet attack`, `set pet stance`, `toggle pet spell`), `teleport` (`TeleportAction`),
+(`pet`, `pet attack`), `teleport` (`TeleportAction`),
 and the dynamic `help` command (live command + strategy lists). (`summon` is **used** — see
 "Commands CleanBot already sends".) The profession-related commands (`spells`, `trainer`,
 `craft`, glyphs) have their own section — see **Professions** below.
 
 ### Professions — spells / trainer / craft / glyphs
-The module has **no "level my professions" or "list my professions" summary command**. What
-exists is a read path (`spells`), a learn path (`trainer`), a trade-mediated crafting path
-(`craft` + `trade`), and glyph-slot management. All are whisper-only; none are bridge-allowlisted.
-CleanBot does not currently send any of these. Verified against `ListSpellsAction.cpp`,
-`TrainerAction.cpp`, `SetCraftAction.cpp` + `CraftValue.h`, and `TradeStatusAction.cpp`.
+The chat commands covered here provide a read path (`spells`), a learn path (`trainer`),
+a trade-mediated crafting path (`craft` + `trade`), and glyph-slot management. CleanBot's
+Professions window uses bridge endpoints for profession data and crafting. It does not
+currently send the chat commands listed here, which are absent from its bridge allowlists.
+Implementations: `ListSpellsAction.cpp`, `TrainerAction.cpp`, `SetCraftAction.cpp` +
+`CraftValue.h`, and `TradeStatusAction.cpp`.
 
 **`spells [filter]`** (`ListSpellsAction`) — the **data-out** for "what does this bot know / can
 make", and it is profession-aware. Reply header `=== Spells ===`, one entry per line (sorted),
@@ -230,8 +243,8 @@ the current spec. The filter's first token is run through `parseSkill`, so it do
 - `spells <profession>` — list only that skill line, e.g. `spells alchemy` / `mining` /
   `tailoring` / `enchanting` / `engineering` / `herbalism` / `skinning` / `leatherworking` /
   `blacksmithing` / `jewelcrafting` / `inscription` / `cooking` / `first aid` / `fishing`.
-  **An empty result means the bot doesn't have that profession** — so you discover a bot's two
-  primaries by probing the names.
+  An empty result means no active spells passed the filters; passive spells and spells outside
+  the active spec are excluded, so this alone does not prove the bot lacks that profession.
 - Each craftable line shows the **crafted item**, its **reagents** (annotated `(xN)` for how many
   the bot holds, or `(buy)` if vendor-buyable), a leading `(xN)` = how many it could craft **right
   now** from bags, and a **skill-difficulty color** — `orange`/`yellow`/`green`/`gray` — derived
@@ -244,18 +257,22 @@ the current spec. The filter's first token is run through `parseSkill`, so it do
   reconstruct the spellbook — i.e. this is the intended hook for profession/recipe data.
 
 **`trainer`** (`TrainerAction`) — list/learn at a trainer NPC.
-- Targeting: the bot resolves the trainer from its **master's selected unit** (`GetMaster():
-  GetSelectedUnit()`), not its own target — so **you click the trainer**, then whisper the bot.
-  The bot must be in range of a living trainer valid for it (`isUseful`/`isPossible`).
-- **Bare `trainer` = list-only** (nothing is learned). Reply: `--- Can learn from <Name> ---`, then
-  `<Spell> <cost>` per line, then `Total cost: <money>` (when non-zero). The list is filtered
+- Targeting: with a master, the bot resolves the trainer from its **master's selected unit**
+  (`GetMaster()->GetSelectedUnit()`), so **you click the trainer**, then whisper the bot.
+  Without a master it uses its own selected unit. `isUseful` checks that the trainer is alive
+  and in the world; `isPossible` checks trainer validity and teachable spells. These methods
+  do not check interaction distance.
+- **Bare `trainer` can learn automatically** under the learning conditions below. When learning
+  is off, the reply is `--- Can learn from <Name> ---`, then `<Spell> <cost>` per line and
+  `Total cost: <money>` (when non-zero). The list is filtered
   through `CanTeachSpell`, so it already excludes spells the bot is too low-level for, lacks
   prerequisites/rep for, or already knows — i.e. it is genuinely *what this bot can learn here*.
-- **`trainer learn`** learns everything listed; **`trainer learn <spelllink>`** learns one.
-- **Profession caveat:** learning at a *tradeskill* trainer is blocked for a bot with an active
-  player master unless the server enables `AiPlayerbot.allowLearnTrainerSpells` (class-spell
-  trainers are not gated this way; random/unowned bots learn freely). **Listing always works**, so
-  you can always see a profession trainer's offerings even when learning is gated.
+- **`trainer learn`** requests learning all eligible spells; **`trainer learn <spelllink>`**
+  requests one, subject to trainer eligibility and cost checks.
+- **Learning condition:** learning is enabled if the arguments contain `learn`, the bot is a
+  random bot, or `Playerbots.AllowLearnTrainerSpells` is enabled together with either a
+  non-tradeskill trainer or a master who is not a real player. The configuration defaults to **true**;
+  it controls the last condition, not the explicit `learn` or random-bot cases.
 
 **`craft <item>` / `craft ?` / `craft reset`** (`SetCraftAction`) + **`trade`** (`TradeStatusAction`)
 — crafting is **trade-mediated**, not fire-and-forget:
@@ -274,8 +291,8 @@ Inscription leveling.
 
 **Item interaction:** While there is no standalone `disenchant` word trigger, disenchanting an
 item on demand is handled via **`cast 13262 <link>`** (dispatched by CleanBot's inventory context
-menu for enchanters). General automation also exists via the **loot strategy** (`ll disenchant` /
-`ll skill` modes — see the `ll` row above), exposed in CleanBot's Loot Quality dropdown.
+menu for enchanters). General automation also exists via the **loot strategy** (`ll disenchant` mode —
+see the `ll` row above), exposed in CleanBot's Loot Quality dropdown.
 Other batch profession actions (`prospect` / `mill` / `smelt` / "enchant my item") do not have
 direct named triggers.
 
@@ -312,17 +329,14 @@ inventory-trading feature is ever added.
 |---|---|---|---|---|
 | **Trade** — `t <link>` / `nt <link>` | `TradeAction.cpp` | bot ↔ player, bot ↔ bot | No (UI + accept) | Trigger is `t` (`nt` = non-traded slot). `TradeAction` opens a trade with the master/group member if one isn't open, then toggles the item in the bot's trade slots (re-send removes). This is what CleanBot's drag-to-trade uses. |
 | **Auto-accept** | `TradeStatusAction.cpp` | — | — | When the *other* side clicks Accept, the bot runs `CheckTrade()` and auto-accepts (`HandleAcceptTradeOpcode`). **Your own bots give for free** (the non-random-account path returns `true` regardless of money); **random/server bots want money or a discount** (`CheckTrade` cost logic). So a player receiving from their own bot is effectively a single Accept click. |
-| **Direct give** — `GiveItemAction` | `GiveItemAction.cpp` | **bot → bot only** | **Yes** (no trade window) | `MoveItemFromInventory` → `MoveItemToInventory`, instant. **Hard constraint:** the receiver must be a playerbot (`GET_PLAYERBOT_AI(receiver)` must be non-null) — a real player can never receive this way. **Not whisper-invokable:** it's an autonomous action whose target is the AI value `"party member without item"` (also `GiveFoodAction` / `GiveWaterAction` for `"party member without food/water"`). It fires from RPG/idle triggers, not a chat command. |
+| **Direct give** — `GiveItemAction` | `GiveItemAction.cpp` | **bot → bot only** | **Yes** (no trade window) | `MoveItemFromInventory` → `MoveItemToInventory`, instant. **Hard constraint:** the receiver must be a playerbot (`GET_PLAYERBOT_AI(receiver)` must be non-null) — a real player can never receive this way. **AI-selected target:** the action uses `"party member without item"` (also `GiveFoodAction` / `GiveWaterAction` for `"party member without food/water"`); it does not accept a recipient name from chat parameters. |
 | **Mail** — `mail` / `sendmail` | mail actions | bot → anyone | No (mailbox + delay) | Goes through the mail system; not immediate. |
 
-**Takeaways for a future bot-to-bot trade feature:**
-- There is **no command to instantly give an item to the *player*** — player-bound transfers go
-  through trade (auto-accepted by your own bots) or mail. An instant move into a real player's
-  bags would be a GM-level action the module only does bot→bot.
-- The instant bot→bot path (`GiveItemAction`) exists but is **autonomous and not commandable**,
-  and only targets a bot lacking the item. To drive bot→bot transfers on demand you'd most
-  likely orchestrate the **trade** flow between two bots (both sides are playerbots, so
-  `TradeStatusAction` auto-accepts), rather than rely on `GiveItemAction`.
+**Transfer constraints:**
+- `GiveItemAction` requires a playerbot receiver and selects it through the AI value
+  `"party member without item"`. That action cannot transfer items to a real player.
+- Its `Execute` method ignores chat parameters, so it does not accept a recipient name
+  supplied in a chat command. CleanBot's item-transfer interface uses the **trade** flow.
 - As always, the command word is the **trigger** (`t`), not the action name — see the triggers
   vs. actions note above.
 
@@ -365,7 +379,8 @@ Also **server chat dot-commands** (sent via `SendChatMessage(..., "SAY")`), regi
 | Command | Used by | Notes |
 |---|---|---|
 | `.playerbots bot add <name>` / `... remove <name>` (`rm`) | Manage tab (Login/Logout) | Spawn / despawn a specific bot character by name (also `remove *` to log all out). |
-| `.playerbots bot addclass <class> [male\|female]` | **Dungeon Finder recruiter** (`Recruiter.lua`) | Pulls a bot of `<class>` (warrior/paladin/hunter/rogue/priest/shaman/mage/warlock/druid/**dk**) from the addclass pool and adds it to your group, **auto-leveled to match you** (re-rolled/re-geared if >3 levels off). **Gated by `AiPlayerbot.AddClassCommand`** (default `1` = players allowed; `0` = GM-only → "You do not have permission…"). DK needs master level ≥ the heroic start level (55). Empty pool → "Add class failed, no available characters!". |
+| `.playerbots bot addclass <class> [male\|female]` | **Dungeon Finder recruiter** (`Recruiter.lua`) | Pulls a bot of `<class>` (warrior/paladin/hunter/rogue/priest/shaman/mage/warlock/druid/**dk**) from the addclass pool and adds it to your group, kept **near your level** (reinitialized to your level if more than 3 levels away). **Gated by `Playerbots.AddClassCommand`** (default `1` = players allowed; `0` = GM-only → "You do not have permission…"). DK needs master level ≥ the heroic start level (55). Empty pool → "Add class failed, no available characters!". |
+| `.playerbots bot self` | Settings → Other → Behavior (`SettingsTab.lua`) | Toggles playerbot AI control for your own character; replies `"SelfBot is now active."` or `"SelfBot is now deactivated."` |
 
 **Role isn't a parameter** — `addclass` takes class (+ optional gender) only. CleanBot's recruiter
 applies the chosen role **after** the bot joins by whispering `talents spec <rolespec>` (see the

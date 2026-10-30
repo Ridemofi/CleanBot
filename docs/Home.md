@@ -8,10 +8,11 @@ a right-click menu, and an optional floating action bar — instead of memorizin
 
 ## Quick start
 
-1. Install the addon into your `Interface/AddOns` folder.
+1. Install the addon into your `Interface/AddOns/CleanBot` folder.
 2. Type **`/cb`** (or **`/cleanbot`**), or left-click the wrench on your minimap.
-3. *(Optional)* Install the [MultiBot Bridge](bridge-protocol.md) server module for silent,
-   instant control. Without it, CleanBot falls back to whispers — everything still works.
+3. *(Optional)* Install the [MultiBot Bridge](bridge-protocol.md) server module for structured
+   bot data and fewer command whispers. Some commands still use whispers with it installed.
+   Most features also work without it, though Spellbook and Professions require the bridge.
 
 New here? Start with **[Getting Started](getting-started.md)**.
 
@@ -23,6 +24,7 @@ New here? Start with **[Getting Started](getting-started.md)**.
 - **[Bot Behavior](bot-behavior.md)** — roles, rotations, movement, and loot.
 - **[Gear & Bags](gear-and-bags.md)** — equipment, inventory, vendors, trading, banking, and quests.
 - **[Professions](professions.md)** — bot profession skill progress, recipes, filters, crafting, and target enchantments.
+- **[Spellbook](spellbook.md)** — inspect learned spells, search abilities, and order dual-click casting.
 - **[Settings](settings.md)** — appearance, behavior toggles, and the action bar.
 
 ## Reference
