@@ -2150,45 +2150,6 @@ describe("Centralized token generation (CB_NextToken)", function()
     end)
 end)
 
-describe("CB_RequestInventory orchestration", function()
-    local origFetchInv    = NS.CB_FetchInventory
-    local origToggleInv   = NS.CB_ToggleInventory
-    local invCalls, toggleCalls
-
-    local function restore()
-        NS.CB_FetchInventory  = origFetchInv
-        NS.CB_ToggleInventory = origToggleInv
-    end
-
-    before_each(function()
-        Mock.reset()
-        invCalls, toggleCalls = {}, {}
-        NS.CB_FetchInventory = function(k, n)
-            table.insert(invCalls, { key = k, botName = n })
-        end
-        NS.CB_ToggleInventory = function(k, n, a)
-            table.insert(toggleCalls, { key = k, botName = n, anchor = a })
-        end
-    end)
-
-    it("delegates to CB_FetchInventory and CB_ToggleInventory", function()
-        CleanBot_PartyBots = { artemis = { name = "Artemis" } }
-        NS.CB_RequestInventory("artemis", "Artemis", "CENTER")
-
-        assert.equals(1, #invCalls)
-        assert.equals("artemis", invCalls[1].key)
-        assert.equals("Artemis", invCalls[1].botName)
-
-        assert.equals(1, #toggleCalls)
-        assert.equals("artemis", toggleCalls[1].key)
-        assert.equals("Artemis", toggleCalls[1].botName)
-        assert.equals("CENTER", toggleCalls[1].anchor)
-        restore()
-    end)
-
-    restore()
-end)
-
 describe("CB_DoFetchInventory bridge stats synchronization", function()
     local origFetchStats = NS.CB_FetchStats
     local statsCalls

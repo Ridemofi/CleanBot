@@ -1928,6 +1928,9 @@ NS.CB_ToggleInventory = function(key, botName, anchor)
     if f:IsShown() then
         f:Hide()
     else
+        if NS.CB_FetchInventory then
+            NS.CB_FetchInventory(key, botName)
+        end
         NS.CB_ShowInventory(key, botName, anchor)
     end
 end

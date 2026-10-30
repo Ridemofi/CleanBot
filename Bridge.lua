@@ -1502,13 +1502,6 @@ NS.CB_On(NS.EV.BOT_INVENTORY_DIRTY, function(key)
     end
 end)
 
----@param key     string        Bot name-key (lowercased lookup key).
----@param botName string        Bot's display name (whisper/bridge target).
----@param anchor  table|string? Placement forwarded to CB_ToggleInventory ("CENTER", a frame, or nil).
-NS.CB_RequestInventory = function(key, botName, anchor)
-    NS.CB_FetchInventory(key, botName)
-    NS.CB_ToggleInventory(key, botName, anchor)
-end
 
 -- Vendor sell coin sound. Wrapped so specs can stub it (no PlaySound in tests).
 NS.CB_PlaySellSound = function()

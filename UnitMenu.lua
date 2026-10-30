@@ -5,18 +5,18 @@
 -- right-clicked unit is a CleanBot-managed bot.
 --
 -- Loaded after Bridge.lua / Individual\* so every handler below exists:
---   CB_SendBotCommand, CB_RequestInventory, CB_ToggleQuests, CB_ManageBot.
+--   CB_SendBotCommand, CB_ToggleInventory, CB_ToggleQuests, CB_ManageBot.
 -- ============================================================
 local NS = CleanBotNS
 
 -- Our custom button keys → the action each runs. `key` is strlower(name)
 -- (the addon's bot key); `name` is the bot's display name. Inventory/Quest open
 -- centered on screen ("CENTER") since this menu fires away from CleanBotFrame;
--- inventory routes through CB_RequestInventory so it fetches on open (the in-window
--- bag button does the same — CB_ToggleInventory alone only renders cached data).
+-- inventory routes through CB_ToggleInventory so it fetches on open (the in-window
+-- bag button does the same).
 local CB_HANDLERS = {
     CB_SUMMON    = function(_,   name) NS.CB_SendBotCommand(name, "summon") end,
-    CB_INVENTORY = function(key, name) NS.CB_RequestInventory(key, name, "CENTER") end,
+    CB_INVENTORY = function(key, name) NS.CB_ToggleInventory(key, name, "CENTER") end,
     CB_SPELLBOOK = function(key, name) NS.CB_ToggleSpellbook(key, name, "CENTER") end,
     CB_PROFESSIONS = function(key, name) NS.CB_ToggleProfessions(key, name, "CENTER") end,
     CB_MANAGE    = function(key)       NS.CB_ManageBot(key) end,

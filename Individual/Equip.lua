@@ -312,11 +312,7 @@ NS.CB_CreateEquipSlots = function(slot, model)
         if not key then return end
         local entry   = CleanBot_PartyBots[key]
         local botName = entry and entry.name or slot.name or key
-        if NS.botInventoryFrames[key] and NS.botInventoryFrames[key]:IsShown() then
-            NS.botInventoryFrames[key]:Hide()
-        else
-            NS.CB_RequestInventory(key, botName)
-        end
+        NS.CB_ToggleInventory(key, botName)
     end)
     NS.CB_SetTooltip(bagBtn, "Open Inventory")
     slot.bagBtn = bagBtn

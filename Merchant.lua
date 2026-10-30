@@ -191,7 +191,7 @@ local function CB_OpenBotInventory(key)
             if k ~= key and f:IsShown() then f:Hide() end
         end
     end
-    NS.CB_RequestInventory(key, entry.name, MerchantFrame)
+    NS.CB_ToggleInventory(key, entry.name, MerchantFrame)
     openedInvKeys[key] = true
 end
 

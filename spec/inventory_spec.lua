@@ -237,3 +237,44 @@ describe("CB_StartDisenchantWatcher", function()
     restore()
 end)
 
+describe("CB_ToggleInventory orchestration", function()
+    local origFetch, origShow, origGetFrame
+    local fetchCalls, showCalls, hideCalls
+    local frameMock
+
+    before_each(function()
+        fetchCalls, showCalls, hideCalls = 0, 0, 0
+        frameMock = { shown = false, IsShown = function(self) return self.shown end, Hide = function(self) self.shown = false hideCalls = hideCalls + 1 end }
+        origFetch    = NS.CB_FetchInventory
+        origShow     = NS.CB_ShowInventory
+        origGetFrame = NS.CB_GetInventoryFrame
+        NS.CB_FetchInventory    = function(k, n) fetchCalls = fetchCalls + 1 end
+        NS.CB_ShowInventory     = function(k, n, a) frameMock.shown = true showCalls = showCalls + 1 end
+        NS.CB_GetInventoryFrame = function(k, n) return frameMock end
+    end)
+
+    local function restore()
+        NS.CB_FetchInventory    = origFetch
+        NS.CB_ShowInventory     = origShow
+        NS.CB_GetInventoryFrame = origGetFrame
+    end
+
+    it("fetches and shows when opening a closed inventory frame", function()
+        NS.CB_ToggleInventory("artemis", "Artemis", "CENTER")
+        assert.equals(1, fetchCalls)
+        assert.equals(1, showCalls)
+        assert.equals(0, hideCalls)
+        restore()
+    end)
+
+    it("hides and does NOT fetch when closing an open inventory frame", function()
+        frameMock.shown = true
+        NS.CB_ToggleInventory("artemis", "Artemis", "CENTER")
+        assert.equals(0, fetchCalls)
+        assert.equals(0, showCalls)
+        assert.equals(1, hideCalls)
+        restore()
+    end)
+
+    restore()
+end)

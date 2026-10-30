@@ -239,8 +239,8 @@ local function CB_CreateBotRow(parent, index)
     invBtn.icon = invIcon
     invBtn:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
     invBtn:SetScript("OnClick", function()
-        if row.botKey and row.botName and NS.CB_RequestInventory then
-            NS.CB_RequestInventory(row.botKey, row.botName, rewardFrame)
+        if row.botKey and row.botName and NS.CB_ToggleInventory then
+            NS.CB_ToggleInventory(row.botKey, row.botName, rewardFrame)
             openedInvKeys[row.botKey] = true
         end
     end)
