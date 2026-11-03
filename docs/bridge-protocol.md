@@ -27,6 +27,18 @@ The self-whisper works because the server bridge replies directly to the sender
 (`player->SendDirectMessage`) and its chat hook fires on the whisper overload regardless
 of recipient — so a solo player can complete the handshake and carry all traffic.
 
+On bridge connection, CleanBot reads the current state with `GET~SELF_BOT~<token>`.
+Checkbox changes use `RUN~SELF_BOT~<token>~ENABLE` or `RUN~SELF_BOT~<token>~DISABLE`.
+The responses are `SELF_BOT_STATE~<token>~<OK/ERR>~<0/1>~<reason>` and
+`SELF_BOT_RESULT~<token>~<OK/ERR>~<0/1>~<reason>`. CleanBot validates the response
+against its latest request and updates the checkbox from the returned state, including
+valid error responses. Requests time out after **5 seconds**; errors and timeouts do not
+trigger a chat retry.
+
+When the effective bridge state is not `present`, each click immediately sends
+`.playerbots bot self` through chat and the server's system message updates the checkbox.
+Clicks are not deferred during bridge detection. No SelfBot state is saved across sessions.
+
 Server-side, the allowlisted text-command families (`COMBAT`, `POSITION`, `LOOT`, `RTI`)
 use `ExecuteSilentBotCommand()`, which calls `botAI->HandleCommand` with
 `CHAT_MSG_WHISPER` and a silent-routing prefix. Other `RUN~` endpoints, including
@@ -39,14 +51,16 @@ formation, inventory, and crafting, use their dedicated handlers.
 `NS.bridgeState` is `"unknown"` until detection resolves, then `"present"` or `"absent"`.
 
 1. **Trigger** — `CB_StartBridgeDetection()` runs at the first `PLAYER_ENTERING_WORLD`
-   after loading the addon (with retries at +1/+3/+6 s), on `PARTY_MEMBERS_CHANGED` /
+   after loading the addon, on `PARTY_MEMBERS_CHANGED` /
    `RAID_ROSTER_UPDATE` while state is still `unknown`, and when SelfBot is confirmed active.
    It works while solo even with SelfBot inactive. Its internal checks skip detection when
    availability is already known or another detection is in progress.
+   Scheduled checks at +1/+3/+6 s use the same guards; they do not resend `HELLO`
+   while detection is pending or availability is already known.
 2. **Probe** — client sends `HELLO~1`.
 3. **Resolve** — a reply starting `HELLO_ACK~` ⇒ `bridgeState = "present"`, accompanied
    by capability broadcast packets (`CAPS_BEGIN`, `CAPS~<list>`, `CAPS_END`), followed by
-   an immediate debounced roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES` or
+   a debounced roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES` or
    `GET~STATES~<token>`) and a linked-accounts fetch. No ack within **3 s** ⇒
    `bridgeState = "absent"`, and discovery falls back to whisper probing (`co ?` to each
    group member; only bots reply with a `Strategies:` line).

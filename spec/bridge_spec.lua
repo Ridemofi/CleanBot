@@ -2206,6 +2206,7 @@ describe("CB_DoFetchInventory bridge stats synchronization", function()
     restore()
 end)
 
+
 describe("Bridge detection lifecycle", function()
     local nsNames = { "CB_SendBotCommand", "CB_RefreshSelfBotCheckbox", "CleanBot_RefreshTabs",
         "selfBotActive", "bridgeState", "bridgeReady", "bridgeDetecting", "loginPhaseActive", "debugBridgeOverride",
@@ -2226,7 +2227,7 @@ describe("Bridge detection lifecycle", function()
         NS.probed, NS.awaitingProbe, NS.joinCandidates = {}, {}, {}
         NS.CB_SendBotCommand = function() end
         NS.CB_RefreshSelfBotCheckbox = nil
-        NS.CleanBot_RefreshTabs = nil
+        NS.CleanBot_RefreshTabs = function() end
         CleanBot_PartyBots = {}
         CleanBot_SavedVars = {}
         _G.UnitClass = function() return "Warrior", "WARRIOR" end
@@ -2270,3 +2271,313 @@ describe("Bridge detection lifecycle", function()
     for _, name in ipairs(globalNames) do _G[name] = savedGlobals[name] end
 end)
 
+local selfBotOriginalRefreshTabs = NS.CleanBot_RefreshTabs
+NS.CleanBot_RefreshTabs = function() end
+
+describe("CHAT_MSG_SYSTEM self-bot state tracking", function()
+    before_each(function()
+        Mock.reset()
+        NS.selfBotActive = false
+        CleanBot_SavedVars = {}
+        _G.UnitClass = _G.UnitClass or function() return "Warrior", "WARRIOR" end
+        _G.CleanBotFrame = _G.CleanBotFrame or CreateFrame("Frame", "CleanBotFrame")
+    end)
+
+    it("records activation from 'SelfBot is now active.'", function()
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now active.")
+        assert.is_true(NS.selfBotActive)
+    end)
+
+    it("records deactivation from 'SelfBot is now deactivated.'", function()
+        NS.selfBotActive = true
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now deactivated.")
+        assert.is_false(NS.selfBotActive)
+    end)
+
+end)
+
+
+if not NS.CB_OnSelfBotCheckboxClick then dofile("SettingsTab.lua") end
+
+describe("SelfBot chat checkbox", function()
+    local checkbox
+    before_each(function()
+        Mock.reset()
+        NS.selfBotActive = false
+        NS.bridgeState = "absent"
+        NS.bridgeReady = true
+        NS.debugBridgeOverride = nil
+        CleanBot_SavedVars = {}
+        CleanBot_PartyBots = {}
+        _G.UnitClass = function() return "Warrior", "WARRIOR" end
+        _G.CleanBotFrame = CreateFrame("Frame", "CleanBotFrame")
+        checkbox = {
+            _checked = false,
+            GetChecked = function(self) return self._checked end,
+            SetChecked = function(self, value) self._checked = value end,
+        }
+    end)
+
+    local function withCheckboxRefresh(fn)
+        local original = NS.CB_RefreshSelfBotCheckbox
+        NS.CB_RefreshSelfBotCheckbox = function()
+            checkbox:SetChecked(NS.selfBotActive == true)
+        end
+        local ok, err = pcall(fn)
+        NS.CB_RefreshSelfBotCheckbox = original
+        if not ok then error(err) end
+    end
+
+    it("sends one chat toggle per click without changing the confirmed state", function()
+        checkbox._checked = true
+        NS.CB_OnSelfBotCheckboxClick(checkbox)
+        assert.equals(1, #Mock.chat)
+        assert.equals(".playerbots bot self", Mock.chat[1].text)
+        assert.equals("SAY", Mock.chat[1].channel)
+        assert.equals(0, #Mock.addon)
+        assert.is_false(checkbox._checked)
+        assert.is_false(NS.selfBotActive)
+        assert.is_nil(CleanBot_SavedVars.manageSelf)
+        assert.is_nil(CleanBot_SavedVars.selfBotActive)
+    end)
+
+    it("updates the checkbox when the server confirms deactivation", function()
+        withCheckboxRefresh(function()
+            NS.selfBotActive = true
+            checkbox._checked = false
+            NS.CB_OnSelfBotCheckboxClick(checkbox)
+            assert.is_true(checkbox._checked)
+            Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now deactivated.")
+            assert.is_false(NS.selfBotActive)
+            assert.is_false(checkbox._checked)
+            assert.is_nil(CleanBot_SavedVars.selfBotActive)
+        end)
+    end)
+
+    it("displays the returned state even when the checkbox prediction differs", function()
+        withCheckboxRefresh(function()
+            checkbox._checked = false
+            NS.CB_OnSelfBotCheckboxClick(checkbox)
+            assert.equals(1, #Mock.chat)
+            Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now active.")
+            assert.is_true(NS.selfBotActive)
+            assert.is_true(checkbox._checked)
+            assert.is_not_nil(CleanBot_PartyBots.testplayer)
+        end)
+    end)
+
+    it("sends repeated clicks independently and applies each server confirmation", function()
+        withCheckboxRefresh(function()
+            for i = 1, 3 do NS.CB_OnSelfBotCheckboxClick(checkbox) end
+            assert.equals(3, #Mock.chat)
+            assert.is_false(NS.selfBotActive)
+            for _, message in ipairs({
+                "SelfBot is now active.",
+                "SelfBot is now deactivated.",
+                "SelfBot is now active.",
+            }) do Mock.fireEvent("CHAT_MSG_SYSTEM", message) end
+            assert.is_true(NS.selfBotActive)
+            assert.is_true(checkbox._checked)
+            assert.equals(3, #Mock.chat)
+        end)
+    end)
+
+    it("tracks manually entered toggles from the server messages", function()
+        withCheckboxRefresh(function()
+            Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now active.")
+            assert.is_true(checkbox._checked)
+            Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now deactivated.")
+            assert.is_false(checkbox._checked)
+            assert.is_nil(CleanBot_PartyBots.testplayer)
+            assert.equals(0, #Mock.chat)
+        end)
+    end)
+
+    it("keeps the confirmed state when the server rejects a toggle", function()
+        checkbox._checked = true
+        NS.CB_OnSelfBotCheckboxClick(checkbox)
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is restricted for this account.")
+        assert.is_false(NS.selfBotActive)
+        assert.is_false(checkbox._checked)
+        assert.equals(1, #Mock.chat)
+    end)
+
+    it("queries bridge state on initialization without sending an activation command", function()
+        Mock.fireEvent("PLAYER_ENTERING_WORLD")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~1")
+        local found = false
+        for _, packet in ipairs(Mock.addon) do
+            if packet.text:match("^GET~SELF_BOT~") then found = true end
+            assert.is_nil(packet.text:match("^RUN~SELF_BOT~"))
+        end
+        assert.is_true(found)
+        for _, command in ipairs(Mock.chat) do
+            assert.is_nil(command.text:find(".playerbots bot self", 1, true))
+        end
+        assert.is_false(NS.selfBotActive)
+    end)
+end)
+
+describe("SelfBot bridge routing", function()
+    before_each(function()
+        Mock.reset()
+        NS.bridgeState = "present"
+        NS.bridgeReady = true
+        NS.bridgeDetecting = false
+        NS.debugBridgeOverride = nil
+        CleanBot_PartyBots = {}
+        CleanBot_SavedVars = {}
+        _G.UnitClass = function() return "Warrior", "WARRIOR" end
+        _G.CleanBotFrame = CreateFrame("Frame", "CleanBotFrame")
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now deactivated.")
+    end)
+
+    local function reply(opcode, token, status, active, reason)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", opcode .. "~" .. token .. "~" .. status .. "~" .. active .. "~" .. reason)
+    end
+
+    it("reads the real state while solo with SelfBot off", function()
+        local token = NS.CB_RequestSelfBotState()
+        assert.equals("GET~SELF_BOT~" .. token, Mock.addon[1].text)
+        assert.equals("WHISPER", Mock.addon[1].channel)
+        reply("SELF_BOT_STATE", token, "OK", "1", "STATE")
+        assert.is_true(NS.selfBotActive)
+        assert.is_not_nil(CleanBot_PartyBots.testplayer)
+        assert.equals(0, #Mock.chat)
+        assert.is_nil(CleanBot_SavedVars.selfBotActive)
+    end)
+
+    it("queries SelfBot state after the bridge is discovered", function()
+        Mock.fireEvent("PLAYER_ENTERING_WORLD")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~1")
+        local found = false
+        for _, packet in ipairs(Mock.addon) do
+            if packet.text:match("^GET~SELF_BOT~") then found = true end
+            assert.is_nil(packet.text:match("^RUN~SELF_BOT~"))
+        end
+        assert.is_true(found)
+    end)
+
+    it("routes the checkbox to explicit commands without a capability check", function()
+        NS.capabilities = {}
+        local cb = {
+            checked = true,
+            GetChecked = function(self) return self.checked end,
+            SetChecked = function(self, value) self.checked = value end,
+        }
+        NS.CB_OnSelfBotCheckboxClick(cb)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~SELF_BOT~[^~]+~ENABLE$"))
+        cb.checked = false
+        NS.CB_OnSelfBotCheckboxClick(cb)
+        assert.is_not_nil(Mock.addon[2].text:match("^RUN~SELF_BOT~[^~]+~DISABLE$"))
+        assert.equals(0, #Mock.chat)
+    end)
+
+    it("accepts APPLIED and ALREADY responses for both requested states", function()
+        local cases = {
+            { enabled = true, active = "1", reason = "APPLIED" },
+            { enabled = true, active = "1", reason = "ALREADY_ENABLED" },
+            { enabled = false, active = "0", reason = "APPLIED" },
+            { enabled = false, active = "0", reason = "ALREADY_DISABLED" },
+        }
+        for _, case in ipairs(cases) do
+            local token = NS.CB_SetSelfBotEnabled(case.enabled)
+            reply("SELF_BOT_RESULT", token, "OK", case.active, case.reason)
+            assert.equals(case.enabled, NS.selfBotActive)
+        end
+        assert.equals(0, #Mock.chat)
+    end)
+
+    it("uses the state returned with a bridge error without sending chat", function()
+        local token = NS.CB_SetSelfBotEnabled(false)
+        reply("SELF_BOT_RESULT", token, "ERR", "1", "RATE_LIMIT")
+        assert.is_true(NS.selfBotActive)
+        assert.equals(0, #Mock.chat)
+    end)
+
+    it("ignores stale tokens, wrong response types, and invalid fields", function()
+        local old = NS.CB_RequestSelfBotState()
+        reply("SELF_BOT_RESULT", old, "OK", "1", "APPLIED")
+        assert.is_false(NS.selfBotActive)
+        local current = NS.CB_SetSelfBotEnabled(true)
+        reply("SELF_BOT_STATE", old, "OK", "1", "STATE")
+        reply("SELF_BOT_STATE", current, "OK", "1", "STATE")
+        reply("SELF_BOT_RESULT", current, "OK", "invalid", "APPLIED")
+        reply("SELF_BOT_RESULT", current, "invalid", "1", "APPLIED")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "SELF_BOT_RESULT~" .. current .. "~OK~1")
+        reply("SELF_BOT_RESULT", current, "OK", "1", "APPLIED~extra")
+        assert.is_false(NS.selfBotActive)
+        reply("SELF_BOT_RESULT", current, "OK", "1", "APPLIED")
+        assert.is_true(NS.selfBotActive)
+    end)
+
+    it("does not block repeated bridge commands or apply older responses", function()
+        local first = NS.CB_SetSelfBotEnabled(true)
+        local second = NS.CB_SetSelfBotEnabled(false)
+        assert.equals(2, #Mock.addon)
+        reply("SELF_BOT_RESULT", first, "OK", "1", "APPLIED")
+        assert.is_false(NS.selfBotActive)
+        reply("SELF_BOT_RESULT", second, "OK", "0", "APPLIED")
+        assert.is_false(NS.selfBotActive)
+    end)
+
+    it("does not overwrite a manual chat confirmation with an older bridge read", function()
+        local token = NS.CB_RequestSelfBotState()
+        Mock.fireEvent("CHAT_MSG_SYSTEM", "SelfBot is now active.")
+        reply("SELF_BOT_STATE", token, "OK", "0", "STATE")
+        assert.is_true(NS.selfBotActive)
+    end)
+
+    it("keeps the pending bridge request when system text is not a SelfBot confirmation", function()
+        local token = NS.CB_RequestSelfBotState()
+        for _, message in ipairs({
+            "Notice: SelfBot is now active.",
+            "SelfBot is now active. Extra text.",
+            "SelfBot is now inactive.",
+            "SelfBot is now unavailable.",
+        }) do
+            Mock.fireEvent("CHAT_MSG_SYSTEM", message)
+            assert.is_false(NS.selfBotActive)
+        end
+        reply("SELF_BOT_STATE", token, "OK", "1", "STATE")
+        assert.is_true(NS.selfBotActive)
+    end)
+
+    it("does not fall back to chat on bridge timeout or late responses", function()
+        local token = NS.CB_SetSelfBotEnabled(true)
+        Mock.tick(5.1)
+        assert.equals(0, #Mock.chat)
+        assert.is_false(NS.selfBotActive)
+        reply("SELF_BOT_RESULT", token, "OK", "1", "APPLIED")
+        assert.is_false(NS.selfBotActive)
+    end)
+
+    it("sends chat immediately when the bridge has not been detected", function()
+        NS.bridgeState = "unknown"
+        NS.bridgeReady = false
+        NS.CB_SetSelfBotEnabled(true)
+        NS.CB_SetSelfBotEnabled(false)
+        assert.equals(2, #Mock.chat)
+        assert.equals(".playerbots bot self", Mock.chat[1].text)
+        assert.equals(".playerbots bot self", Mock.chat[2].text)
+        assert.equals(0, #Mock.addon)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "HELLO_ACK~1")
+        for _, packet in ipairs(Mock.addon) do
+            assert.is_nil(packet.text:match("^RUN~SELF_BOT~"))
+        end
+    end)
+
+    it("does not resend the chat toggle when bridge detection times out", function()
+        NS.bridgeState = "unknown"
+        NS.bridgeReady = false
+        NS.CB_StartBridgeDetection()
+        NS.CB_SetSelfBotEnabled(false)
+        assert.equals(1, #Mock.chat)
+        Mock.tick(3.1)
+        assert.equals("absent", NS.bridgeState)
+        assert.equals(1, #Mock.chat)
+        assert.equals(".playerbots bot self", Mock.chat[1].text)
+    end)
+end)
+
+NS.CleanBot_RefreshTabs = selfBotOriginalRefreshTabs

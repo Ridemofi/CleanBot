@@ -380,7 +380,7 @@ Also **server chat dot-commands** (sent via `SendChatMessage(..., "SAY")`), regi
 |---|---|---|
 | `.playerbots bot add <name>` / `... remove <name>` (`rm`) | Manage tab (Login/Logout) | Spawn / despawn a specific bot character by name (also `remove *` to log all out). |
 | `.playerbots bot addclass <class> [male\|female]` | **Dungeon Finder recruiter** (`Recruiter.lua`) | Pulls a bot of `<class>` (warrior/paladin/hunter/rogue/priest/shaman/mage/warlock/druid/**dk**) from the addclass pool and adds it to your group, kept **near your level** (reinitialized to your level if more than 3 levels away). **Gated by `Playerbots.AddClassCommand`** (default `1` = players allowed; `0` = GM-only → "You do not have permission…"). DK needs master level ≥ the heroic start level (55). Empty pool → "Add class failed, no available characters!". |
-| `.playerbots bot self` | Settings → Other → Behavior (`SettingsTab.lua`) | Toggles playerbot AI control for your own character; replies `"SelfBot is now active."` or `"SelfBot is now deactivated."` |
+| `.playerbots bot self` | Settings → Other → Behavior (`SettingsTab.lua`), when the bridge is absent | Toggles playerbot AI control for your own character; replies `"SelfBot is now active."` or `"SelfBot is now deactivated."`. With the bridge, the checkbox uses explicit `RUN~SELF_BOT` activation/deactivation requests instead. |
 
 **Role isn't a parameter** — `addclass` takes class (+ optional gender) only. CleanBot's recruiter
 applies the chosen role **after** the bot joins by whispering `talents spec <rolespec>` (see the

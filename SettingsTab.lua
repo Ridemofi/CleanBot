@@ -296,6 +296,14 @@ end
 -- Settings tab
 -- ============================================================
 
+--- Routes the selected state through the bridge when present; otherwise sends the chat toggle.
+---@param self table The checkbox widget.
+NS.CB_OnSelfBotCheckboxClick = function(self)
+    local checked = self:GetChecked() and true or false
+    self:SetChecked(NS.selfBotActive == true)
+    NS.CB_SetSelfBotEnabled(checked)
+end
+
 --- Builds the Settings tab: the nested sub-tabs and all their option widgets.
 NS.CleanBot_BuildSettingsTab = function()
     NS.settingsPanel = NS.CB_CreatePanel(NS.contentFrame, "CleanBotSettingsPanel", 2, "panel")
@@ -765,45 +773,19 @@ NS.CleanBot_BuildSettingsTab = function()
         CleanBot_SavedVars.botEmotes = checked
     end)
 
-    -- ── Auto-Enable Self as Bot ────────────────────────────────
-    -- Preference only: when on, the addon runs `.playerbot bot self` once on a fresh
-    -- login so the player spawns managed. It does NOT toggle self-bot in the current
-    -- session (the command is a server toggle and the character spawns off, so re-sending
-    -- mid-session / on reload would flip it the wrong way). Live state is tracked from the
-    -- server's "Enable/Disable player botAI" messages instead. Not ElvUI-gated.
-    local SELF_BOT_TOOLTIP = "When enabled, CleanBot registers your own character as a bot (via .playerbot bot self) automatically each time you log in."
-    local selfBotCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotSelfBotCB", "Auto-Enable Self as Bot", SELF_BOT_TOOLTIP)
-    selfBotCB:SetChecked(NS.manageSelf == true)
+    -- ── SelfBot ──────────────────────────────────────────────
+    -- The checkbox reflects the server-confirmed SelfBot state.
+    local SELF_BOT_TOOLTIP = "Check to activate AI control of your character; uncheck to deactivate it. The checkbox updates from the server's confirmed state. Without MultiBot Bridge, each click sends the server's toggle command."
+    local selfBotCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotSelfBotCB", "SelfBot", SELF_BOT_TOOLTIP)
+    selfBotCB:SetChecked(NS.selfBotActive == true)
     NS.CB_AnchorBelow(selfBotCB, botEmotesCB)
-    -- Exposed so the first-time popup can tick the box when it enables the preference.
-    NS.CB_RefreshSelfBotCheckbox = function() selfBotCB:SetChecked(NS.manageSelf == true) end
+    NS.CB_RefreshSelfBotCheckbox = function() selfBotCB:SetChecked(NS.selfBotActive == true) end
 
     -- Tracks the last Behavior checkbox so the next one anchors below it regardless of
     -- whether the ElvUI-gated Item Glow box exists. Reassigned as more boxes are added.
     local lastBehaviorCB = selfBotCB
 
-    selfBotCB:SetScript("OnClick", function(self)
-        local checked = self:GetChecked() and true or false
-        self:SetChecked(checked)
-        NS.manageSelf = checked
-        CleanBot_SavedVars.manageSelf = checked
-        -- Convenience: enabling the preference while not currently a self-bot turns it on
-        -- right now too (instead of waiting for next login). Guarded on the live state so
-        -- the pure-toggle command never flips an already-active self-bot off.
-        if checked and not NS.selfBotActive then
-            SendChatMessage(".playerbot bot self", "SAY")
-        end
-    end)
-
-    -- First-time popup (offered when the server first reports "Enable player botAI"):
-    -- a convenience to switch the auto-enable preference on.
-    NS.CB_RegisterConfirmPopup("CLEANBOT_SELFBOT_AUTO",
-        "You enabled self-bot management. Automatically enable it each time you log in?",
-        function()
-            NS.manageSelf = true
-            if CleanBot_SavedVars then CleanBot_SavedVars.manageSelf = true end
-            if NS.CB_RefreshSelfBotCheckbox then NS.CB_RefreshSelfBotCheckbox() end
-        end)
+    selfBotCB:SetScript("OnClick", NS.CB_OnSelfBotCheckboxClick)
 
     -- ── Enable Item Glow (Blizz UI path only) ──────────────────
     -- The rarity overlay only exists on the Blizz path, so the toggle is created only

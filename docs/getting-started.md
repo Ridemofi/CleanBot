@@ -36,9 +36,11 @@ tooltip shows your live bridge status (green = present, red = absent).
 
 ## Managing your own character
 
-CleanBot can also run **your own character** as a bot. Turn on *Auto-Enable Self as Bot* in
-[Settings](settings.md) → Other → Behavior and you'll spawn managed each login — handy for soloing with
-a self-bot or testing without a group.
+CleanBot can also run **your own character** as a bot. Use **SelfBot** in
+[Settings](settings.md) → Other → Behavior to activate or deactivate it.
+With MultiBot Bridge, the checkbox reads the server's current state on connection, including
+after `/reload`. Without the bridge, each click sends the server's chat toggle and the reply
+updates the checkbox. CleanBot does not activate SelfBot automatically on login.
 
 ## Where to next
 

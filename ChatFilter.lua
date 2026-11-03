@@ -182,7 +182,7 @@ local function filterWhisper(_, _, msg, sender)
 end
 
 -- System: hide the server output CleanBot triggers and already parses — the self-bot
--- "player botAI" toggle line, the "Linked accounts:" dump, and the per-name bot-add
+-- "SelfBot is now..." toggle line, the "Linked accounts:" dump, and the per-name bot-add
 -- results. collectingLinked is tracked locally (not off Bridge's flag) so it stays
 -- consistent regardless of filter-vs-handler ordering for the same line.
 local collectingLinked = false
@@ -200,7 +200,9 @@ local function filterSystem(_, _, msg)
     if not enabled() or not msg then return false end
     local lower = strlower(msg)
 
-    if lower:find("player botai", 1, true) then return true end
+    if msg == "SelfBot is now active." or msg == "SelfBot is now deactivated." then
+        return true
+    end
 
     if lower:find("linked accounts", 1, true) then
         collectingLinked = true

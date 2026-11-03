@@ -112,11 +112,10 @@ NS.debugSimulate       = false ---@type boolean
 -- authoritative state comes back (see CB_SendStrategyToggle / CB_VerifyStrategyExpect).
 NS.debugVerify         = false ---@type boolean
 
--- No-bridge login gating: on a fresh login (not a /reload) bots may not be
--- online yet, so we block CB_ProbePartyForBots until bridge detection resolves.
--- Once it does, the probe sweep runs and a not-yet-ready bot is caught later via
--- its readiness whisper (see NS.joinCandidates).
-NS.loginPhaseActive = false  -- true only on fresh login, cleared when detection resolves
+-- Pause whisper-based bot discovery while initial bridge detection is pending.
+-- If no bridge responds, probe group members after the detection timeout.
+-- Members still loading can be probed again when they later whisper (see NS.joinCandidates).
+NS.loginPhaseActive = false  -- gates initial discovery until bridge detection resolves
 
 -- Re-probe candidates: members CB_ProbePartyForBots has probed but not yet confirmed. If that
 -- probe goes unanswered because the bot was still loading, its later readiness whisper re-probes
@@ -151,8 +150,8 @@ NS.syncPending = false
 -- they are probed a single time and then ignored. Each probed member is flagged as a
 -- joinCandidate so that, if this probe goes unanswered because the bot was still loading,
 -- its later readiness whisper re-probes it (see the CHAT_MSG_WHISPER greeting branch).
--- Skipped during loginPhaseActive — bots may not be online yet on fresh
--- login; probing waits until detection resolves, then this sweep runs.
+-- Skipped while initial bridge detection is pending; the no-bridge sweep runs
+-- once detection resolves.
 local function CB_ProbePartyForBots()
     if NS.loginPhaseActive then return end
 
@@ -183,24 +182,16 @@ end
 -- ============================================================
 -- Self-bot management
 -- ============================================================
--- mod-playerbots can register the player's own character as a bot. The authoritative
--- live signal is the server's "Enable/Disable player botAI" system message (parsed in
--- the CHAT_MSG_SYSTEM handler), which fires however the toggle happens — addon, login
--- auto-enable, or a manually typed `.playerbot bot self`. CB_SetSelfBotActive applies
--- that live state on the addon side; it never sends the toggle command itself (that is
--- a pure server toggle, sent only once on a fresh login — see PLAYER_ENTERING_WORLD).
---
--- NS.selfBotActive  = live state (driven by the messages; persisted only for reload).
--- NS.manageSelf     = auto-enable-on-login preference (Settings checkbox / first-time popup).
+-- SelfBot uses bridge state queries and explicit activation commands when available.
+-- Without the bridge, chat toggle confirmations update the same state and checkbox.
 
---- Applies the player's live self-bot state on the addon side (no command is sent).
---- active=true seeds the player as a known bot, reads real strategies, and surfaces them
---- in the lists; active=false drops them. Persists the state for /reload recovery.
+--- Updates the SelfBot state, roster entry, and interface from a server confirmation.
+--- Active characters are registered in the bot roster and their strategies are queried.
 ---@param active boolean  Whether the player is currently a self-bot.
 NS.CB_SetSelfBotActive = function(active)
     active = active and true or false
     NS.selfBotActive = active
-    if CleanBot_SavedVars then CleanBot_SavedVars.selfBotActive = active end
+    if NS.CB_RefreshSelfBotCheckbox then NS.CB_RefreshSelfBotCheckbox() end
 
     local name = UnitName("player")
     local key  = name and strlower(name)
@@ -234,7 +225,7 @@ NS.CB_SetSelfBotActive = function(active)
         CleanBot_PartyBots[key] = nil
     end
 
-    if CleanBotFrame:IsShown() and NS.CleanBot_RefreshTabs then
+    if CleanBotFrame:IsShown() then
         NS.CleanBot_RefreshTabs()
     end
 end
@@ -410,11 +401,6 @@ local function CB_TagSelfGroup(text)
 end
 NS.CB_TagSelfGroup = CB_TagSelfGroup
 
--- Raw dispatch: the actual bridge-or-whisper send. Routes through the bridge (silent) when
--- present and the command is allowlisted; otherwise whispers. Honors the debugSimulate and
--- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for
--- bridge/simulated commands — NOT to be called directly for ad-hoc whispers; use
--- CB_SendBotCommand so they serialize.
 local tokenSeq = 0
 local function CB_NextToken(prefix)
     tokenSeq = (tokenSeq or 0) + 1
@@ -422,6 +408,72 @@ local function CB_NextToken(prefix)
 end
 NS.CB_NextToken = CB_NextToken
 
+local selfBotRequest
+
+local function CB_SelfBotError(reason)
+    local messages = {
+        FORBIDDEN = "SelfBot is restricted for this account.",
+        DISABLED = "SelfBot is disabled on this server.",
+        RATE_LIMIT = "Too many SelfBot requests. Try again shortly.",
+        TIMEOUT = "The server did not confirm the SelfBot request.",
+        STATE_MISMATCH = "The server did not apply the requested SelfBot state.",
+    }
+    NS.CB_Print(messages[reason] or "The server could not complete the SelfBot request.")
+end
+
+local function CB_SendSelfBotRequest(opcode, enabled)
+    local request = { token = CB_NextToken("selfbot"), opcode = opcode, enabled = enabled }
+    selfBotRequest = request
+    local message = opcode .. "~SELF_BOT~" .. request.token
+    if opcode == "RUN" then message = message .. (enabled and "~ENABLE" or "~DISABLE") end
+    CB_SendBridge(message)
+    NS.CB_After(5, function()
+        if selfBotRequest ~= request then return end
+        selfBotRequest = nil
+        CB_SelfBotError("TIMEOUT")
+    end)
+    return request.token
+end
+
+NS.CB_RequestSelfBotState = function()
+    if CB_EffectiveBridgeState() == "present" then
+        return CB_SendSelfBotRequest("GET")
+    end
+end
+
+NS.CB_SetSelfBotEnabled = function(enabled)
+    if CB_EffectiveBridgeState() == "present" then
+        return CB_SendSelfBotRequest("RUN", enabled == true)
+    else
+        SendChatMessage(".playerbots bot self", "SAY")
+    end
+end
+
+local function CB_HandleSelfBotResponse(msg)
+    local opcode, r1 = NS.CB_SplitOnce(msg, "~")
+    local token, r2 = NS.CB_SplitOnce(r1, "~")
+    local status, r3 = NS.CB_SplitOnce(r2, "~")
+    local active, reason = NS.CB_SplitOnce(r3, "~")
+    if not strfind(r3, "~", 1, true) or strfind(reason, "~", 1, true) then return end
+    local request = selfBotRequest
+    if not request or token ~= request.token then return end
+    if opcode ~= (request.opcode == "GET" and "SELF_BOT_STATE" or "SELF_BOT_RESULT") then return end
+    if (status ~= "OK" and status ~= "ERR") or (active ~= "0" and active ~= "1") then return end
+    selfBotRequest = nil
+    local enabled = active == "1"
+    NS.CB_SetSelfBotActive(enabled)
+    if status == "ERR" then
+        CB_SelfBotError(CB_UrlDecode(reason))
+    elseif request.opcode == "RUN" and request.enabled ~= enabled then
+        CB_SelfBotError("STATE_MISMATCH")
+    end
+end
+
+-- Raw dispatch: the actual bridge-or-whisper send. Routes through the bridge (silent) when
+-- present and the command is allowlisted; otherwise whispers. Honors the debugSimulate and
+-- debugBridgeOverride toggles. Called by the serial queue (for whispers) and directly for
+-- bridge/simulated commands — NOT to be called directly for ad-hoc whispers; use
+-- CB_SendBotCommand so they serialize.
 ---@param botName string  Target bot's name (whisper recipient / bridge BOT field).
 ---@param command string  The command text to run.
 local function CB_SendBotCommandRaw(botName, command)
@@ -1855,7 +1907,6 @@ bridgeFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
 bridgeFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
 bridgeFrame:RegisterEvent("INSPECT_TALENT_READY")
 bridgeFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-bridgeFrame:RegisterEvent("PLAYER_LOGOUT")
 bridgeFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "CHAT_MSG_WHISPER" then
         local msg, sender = ...
@@ -1870,7 +1921,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         -- We probe on the FIRST unsolicited whisper from a current group member (not yet probed),
         -- OR re-probe a joinCandidate whose earlier sweep probe went unanswered while it loaded.
         -- Clearing the candidate bounds a chatty human to a single stray probe. Excludes a
-        -- "Strategies:" line (the reply, handled below), known bots, and the fresh-login window.
+        -- "Strategies:" line (the reply, handled below), known bots, and the initial detection window.
         if not entry and not NS.loginPhaseActive
            and strsub(msg, 1, 12) ~= "Strategies: "
            and CB_EffectiveBridgeState() ~= "present"
@@ -2169,6 +2220,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 NS.joinCandidates   = {}
                 -- Keep the Debug tab's "Auto (<state>)" label current.
                 if NS.CB_RefreshDebugTab then NS.CB_RefreshDebugTab() end
+                NS.CB_RequestSelfBotState()
                 CB_BridgeRequest()
                 NS.CleanBot_FetchLinkedAccounts()
             end
@@ -2204,6 +2256,10 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             -- ever populated via the whisper discovery path. Without this guard a
             -- real bridge would keep pushing strategy/inventory data and the
             -- "absent" simulation would be incomplete.
+            return
+
+        elseif msg and (strsub(msg, 1, 15) == "SELF_BOT_STATE~" or strsub(msg, 1, 16) == "SELF_BOT_RESULT~") then
+            CB_HandleSelfBotResponse(msg)
             return
 
         elseif msg and strsub(msg, 1, 12) == "GAMEOBJECTS_" then
@@ -3252,21 +3308,14 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "CHAT_MSG_SYSTEM" then
         local msg = ...
-        -- Self-bot live state: the server prints "Enable/Disable player botAI" on every
-        -- toggle (addon, login auto-enable, or a manually typed command). This is the
-        -- authoritative source of truth — drive tracking off it rather than assuming.
-        local lower = msg and strlower(msg)
-        if lower and lower:find("player botai", 1, true) then
-            if lower:find("enable", 1, true) then
-                -- First-ever detection: offer to set the auto-enable preference (once).
-                if CleanBot_SavedVars and not CleanBot_SavedVars.selfBotPromptShown then
-                    CleanBot_SavedVars.selfBotPromptShown = true
-                    if not NS.manageSelf then StaticPopup_Show("CLEANBOT_SELFBOT_AUTO") end
-                end
-                NS.CB_SetSelfBotActive(true)
-            elseif lower:find("disable", 1, true) then
-                NS.CB_SetSelfBotActive(false)
-            end
+        -- Server notifications confirm state changes from addon and manual chat commands.
+        if msg == "SelfBot is now active." then
+            selfBotRequest = nil
+            NS.CB_SetSelfBotActive(true)
+            return
+        elseif msg == "SelfBot is now deactivated." then
+            selfBotRequest = nil
+            NS.CB_SetSelfBotActive(false)
             return
         end
 
@@ -3339,17 +3388,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        -- One-shot: reset bridge state at the first world entry (login),
+        -- One-shot: reset bridge state at the first world entry after login or /reload,
         -- then stop listening so later zone/instance loads don't wipe the cache.
         self:UnregisterEvent("PLAYER_ENTERING_WORLD")
 
-        -- Determine whether this is a fresh login or a /reload.
-        -- PLAYER_LOGOUT does not fire on /reload, so sessionActive remaining true
-        -- means the last session ended via reload rather than a proper logout.
-        local isReload = CleanBot_SavedVars and CleanBot_SavedVars.sessionActive == true
-        CleanBot_SavedVars.sessionActive = true
-
-        NS.loginPhaseActive = not isReload  -- gate bot probing on fresh login only
+        NS.loginPhaseActive = true
+        selfBotRequest = nil
         NS.joinCandidates   = {}
         NS.bridgeReady      = false
         NS.bridgeState      = "unknown"
@@ -3366,39 +3410,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.awaitingProbe    = {}
         CleanBot_PartyBots  = {}
 
-        -- Self-bot live state across the world entry:
-        --   Fresh login — the character always spawns with self-bot OFF, so force it off
-        --     (overriding any stale persisted value); auto-enable below re-toggles it.
-        --   Reload — server state is preserved and no message re-fires, so keep the
-        --     persisted NS.selfBotActive (restored at PLAYER_LOGIN) and re-apply it below.
-        if not isReload then
-            NS.selfBotActive = false
-            if CleanBot_SavedVars then CleanBot_SavedVars.selfBotActive = false end
-        end
-
         CB_StartBridgeDetection()
-        -- Retry bridge detection during world initialization.
+        -- Recheck bridge detection during world initialization.
         NS.CB_After(1, CB_StartBridgeDetection)
         NS.CB_After(3, CB_StartBridgeDetection)
         NS.CB_After(6, CB_StartBridgeDetection)
 
-        -- Self-bot enable/restore (delayed so the player is in-world and detection has had
-        -- a chance to start). `.playerbot bot self` is a pure toggle and the character
-        -- spawns OFF, so it is sent ONLY on a fresh login — never on reload (which would
-        -- turn it off). The "Enable player botAI" reply drives CB_SetSelfBotActive.
-        if not isReload then
-            if NS.manageSelf then
-                NS.CB_After(2, function() SendChatMessage(".playerbot bot self", "SAY") end)
-            end
-        elseif NS.selfBotActive then
-            -- Reload while active: re-seed the wiped cache without re-toggling the server.
-            NS.CB_After(2, function() NS.CB_SetSelfBotActive(true) end)
-        end
-
-    elseif event == "PLAYER_LOGOUT" then
-        -- Clear the flag so the next session is treated as a fresh login.
-        if CleanBot_SavedVars then
-            CleanBot_SavedVars.sessionActive = false
-        end
     end
 end)

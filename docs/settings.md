@@ -24,7 +24,12 @@ cosmetic — leave it alone unless you want to tweak the spacing.
 ### Behavior
 
 - **Enable Bot Emotes** — a bot waves when you switch to its tab.
-- **Auto-Enable Self as Bot** — run your own character as a bot each time you log in.
+- **SelfBot** — activate or deactivate AI control of your character. With MultiBot Bridge,
+  CleanBot reads the current state when connecting and sends explicit activation/deactivation
+  requests. Without the bridge, each click sends `.playerbots bot self` and the server's reply
+  updates the checkbox. After `/reload` without the bridge, the checkbox starts unchecked
+  until another toggle is confirmed. CleanBot does not save this state or automatically
+  activate SelfBot on login.
 - **Enable Item Glow** — rarity-colored glow on uncommon-or-better items (shown only without
   ElvUI, which has its own quality borders).
 - **Hide Bot Chatter** — keeps CleanBot's own command whispers, the bot replies it requests, and

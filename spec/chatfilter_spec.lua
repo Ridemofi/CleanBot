@@ -256,7 +256,15 @@ describe("ChatFilter system messages", function()
     end)
 
     it("hides the self-bot toggle line", function()
-        assert.is_true(filter("CHAT_MSG_SYSTEM", "Player botAI enabled"))
+        assert.is_true(filter("CHAT_MSG_SYSTEM", "SelfBot is now active."))
+        assert.is_true(filter("CHAT_MSG_SYSTEM", "SelfBot is now deactivated."))
+    end)
+
+    it("keeps system text that is not an exact SelfBot confirmation visible", function()
+        assert.is_false(filter("CHAT_MSG_SYSTEM", "Notice: SelfBot is now active."))
+        assert.is_false(filter("CHAT_MSG_SYSTEM", "SelfBot is now active. Extra text."))
+        assert.is_false(filter("CHAT_MSG_SYSTEM", "SelfBot is now inactive."))
+        assert.is_false(filter("CHAT_MSG_SYSTEM", "SelfBot is now unavailable."))
     end)
 
     it("hides the linked-accounts header and its '- NAME' rows, then stops at a normal line", function()
@@ -275,6 +283,6 @@ describe("ChatFilter system messages", function()
 
     it("shows everything when Hide Bot Chatter is off", function()
         NS.hideBotChatter = false
-        assert.is_false(filter("CHAT_MSG_SYSTEM", "Player botAI enabled"))
+        assert.is_false(filter("CHAT_MSG_SYSTEM", "SelfBot is now active."))
     end)
 end)
