@@ -21,8 +21,7 @@ SendAddonMessage("MBOT", msg, channel)
 |---|---|
 | In a raid (`GetNumRaidMembers() > 0`) | `"RAID"` — `"PARTY"` does **not** reach raid members |
 | In a party | `"PARTY"` |
-| Solo with self-bot active (`NS.selfBotActive`) | `"WHISPER"` to the player's own name |
-| Solo, no self-bot | no-op (nothing to talk to) |
+| Solo, whether SelfBot is active or not | `"WHISPER"` to the player's own name |
 
 The self-whisper works because the server bridge replies directly to the sender
 (`player->SendDirectMessage`) and its chat hook fires on the whisper overload regardless
@@ -39,10 +38,11 @@ formation, inventory, and crafting, use their dedicated handlers.
 
 `NS.bridgeState` is `"unknown"` until detection resolves, then `"present"` or `"absent"`.
 
-1. **Trigger** — `CB_StartBridgeDetection()` runs at `PLAYER_ENTERING_WORLD` (with retries
-   at +1/+3/+6 s for late-loading rosters), on `PARTY_MEMBERS_CHANGED` /
-   `RAID_ROSTER_UPDATE` while state is still `unknown`, and when self-bot is enabled.
-   It needs either a group or an active self-bot, and is idempotent.
+1. **Trigger** — `CB_StartBridgeDetection()` runs at the first `PLAYER_ENTERING_WORLD`
+   after loading the addon (with retries at +1/+3/+6 s), on `PARTY_MEMBERS_CHANGED` /
+   `RAID_ROSTER_UPDATE` while state is still `unknown`, and when SelfBot is confirmed active.
+   It works while solo even with SelfBot inactive. Its internal checks skip detection when
+   availability is already known or another detection is in progress.
 2. **Probe** — client sends `HELLO~1`.
 3. **Resolve** — a reply starting `HELLO_ACK~` ⇒ `bridgeState = "present"`, accompanied
    by capability broadcast packets (`CAPS_BEGIN`, `CAPS~<list>`, `CAPS_END`), followed by
@@ -224,7 +224,7 @@ single decision point that makes `/cbdebug bridge on|off|reset` work (see
    negotiated capabilities remain tracked underneath the override.
 
 Lifecycle reads (detection guard/timeout, `HELLO_ACK` → present, roster-event trigger,
-login/logout resets) intentionally stay on raw `NS.bridgeState` so the true state is
+world-entry resets) intentionally stay on raw `NS.bridgeState` so the true state is
 always tracked underneath the override.
 
 ---

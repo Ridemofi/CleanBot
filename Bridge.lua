@@ -220,11 +220,7 @@ NS.CB_SetSelfBotActive = function(active)
             }
         end
 
-        -- Now that we're a live self-bot, resolve the bridge if it hasn't yet (the gate
-        -- keys off NS.selfBotActive, so a self-whisper handshake can run solo).
-        if NS.bridgeState == "unknown" and NS.CB_StartBridgeDetection then
-            NS.CB_StartBridgeDetection()
-        end
+        NS.CB_StartBridgeDetection()
 
         -- Read the player's actual strategies. A bare "co ?" (awaitingCo, NOT coVerifyOnly)
         -- stores the combat reply then chains "nc ?" — a full read, same as the probe path.
@@ -351,20 +347,13 @@ local function CB_EffectiveBridgeState()
 end
 NS.CB_EffectiveBridgeState = CB_EffectiveBridgeState
 
--- Sends a bridge addon packet on the correct channel:
---   • In a raid  → "RAID"   ("PARTY" does not reach raid members)
---   • In a party → "PARTY"
---   • Solo + self-management on → "WHISPER" to self. The server bridge replies directly
---     to the sender (player->SendDirectMessage in MultiBotBridge.cpp) and its chat hook
---     fires on the whisper overload regardless of recipient, so a self-whisper completes
---     the handshake and carries all GET~/RUN~ traffic with no group present.
---   • Solo without self-management → no bots to talk to, so this no-ops.
+-- Uses RAID or PARTY in a group and WHISPER to the player when solo.
 local function CB_SendBridge(msg)
     if GetNumRaidMembers() > 0 then
         SendAddonMessage("MBOT", msg, "RAID")
     elseif GetNumPartyMembers() > 0 then
         SendAddonMessage("MBOT", msg, "PARTY")
-    elseif NS.selfBotActive then
+    else
         SendAddonMessage("MBOT", msg, "WHISPER", UnitName("player"))
     end
 end
@@ -1825,25 +1814,14 @@ local function CB_BridgeRequest()
     NS.CB_RequestSync()
 end
 
-local function CB_SendHello()
-    -- CB_SendBridge picks the channel (group broadcast, or self-whisper when solo +
-    -- selfBotActive), and no-ops when there is nothing to detect against.
-    if NS.CB_InGroup() or NS.selfBotActive then
-        CB_SendBridge("HELLO~1")
-    end
-end
-
 -- Sends HELLO and, if no HELLO_ACK arrives within the timeout, declares the
 -- bridge absent and switches to no-bridge (whisper) discovery. Only runs while
 -- the bridge state is still unknown.
 local function CB_StartBridgeDetection()
     if NS.bridgeState ~= "unknown" then return end
     if NS.bridgeDetecting then return end           -- a detection timer is already running
-    -- Need either a group to detect against, or an active self-bot (which talks to the
-    -- bridge over a self-whisper). Solo with no self-bot has nothing to detect.
-    if not NS.CB_InGroup() and not NS.selfBotActive then return end
     NS.bridgeDetecting = true
-    CB_SendHello()
+    CB_SendBridge("HELLO~1")
 
     NS.CB_After(3, function()
         NS.bridgeDetecting  = false
@@ -1862,8 +1840,6 @@ local function CB_StartBridgeDetection()
     end)
 end
 
--- Exposed so the self-bot toggle can kick off detection the moment it's enabled
--- (the function is idempotent — guards on state / in-progress / nothing-to-detect).
 NS.CB_StartBridgeDetection = CB_StartBridgeDetection
 
 -- ============================================================
@@ -3401,12 +3377,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         end
 
         CB_StartBridgeDetection()
-        -- The party/raid roster may not be query-able yet at login, so the call
-        -- above can no-op (GetNum*Members == 0) and the roster event may have
-        -- already fired during the loading screen. Retry a few times so being
-        -- already in a group — especially a raid — is reliably detected.
-        -- CB_StartBridgeDetection is idempotent (guards on state / in-progress /
-        -- in-group), so extra calls are harmless once detection has begun.
+        -- Retry bridge detection during world initialization.
         NS.CB_After(1, CB_StartBridgeDetection)
         NS.CB_After(3, CB_StartBridgeDetection)
         NS.CB_After(6, CB_StartBridgeDetection)

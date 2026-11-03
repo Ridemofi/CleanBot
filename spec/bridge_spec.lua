@@ -2206,3 +2206,67 @@ describe("CB_DoFetchInventory bridge stats synchronization", function()
     restore()
 end)
 
+describe("Bridge detection lifecycle", function()
+    local nsNames = { "CB_SendBotCommand", "CB_RefreshSelfBotCheckbox", "CleanBot_RefreshTabs",
+        "selfBotActive", "bridgeState", "bridgeReady", "bridgeDetecting", "loginPhaseActive", "debugBridgeOverride",
+        "probed", "awaitingProbe", "joinCandidates" }
+    local globalNames = { "UnitClass", "CleanBotFrame", "CleanBot_PartyBots", "CleanBot_SavedVars" }
+    local savedNS, savedGlobals = {}, {}
+    for _, name in ipairs(nsNames) do savedNS[name] = NS[name] end
+    for _, name in ipairs(globalNames) do savedGlobals[name] = _G[name] end
+
+    before_each(function()
+        Mock.reset()
+        NS.selfBotActive = false
+        NS.bridgeState = "unknown"
+        NS.bridgeReady = false
+        NS.bridgeDetecting = false
+        NS.loginPhaseActive = false
+        NS.debugBridgeOverride = nil
+        NS.probed, NS.awaitingProbe, NS.joinCandidates = {}, {}, {}
+        NS.CB_SendBotCommand = function() end
+        NS.CB_RefreshSelfBotCheckbox = nil
+        NS.CleanBot_RefreshTabs = nil
+        CleanBot_PartyBots = {}
+        CleanBot_SavedVars = {}
+        _G.UnitClass = function() return "Warrior", "WARRIOR" end
+        _G.CleanBotFrame = CreateFrame("Frame")
+    end)
+
+    it("detects the bridge on world entry while solo with SelfBot inactive", function()
+        Mock.fireEvent("PLAYER_ENTERING_WORLD")
+        assert.equals("HELLO~1", Mock.addon[1].text)
+        assert.equals("WHISPER", Mock.addon[1].channel)
+        assert.equals(UnitName("player"), Mock.addon[1].target)
+        assert.is_false(NS.selfBotActive)
+        assert.equals(0, #Mock.chat)
+    end)
+
+    for _, scenario in ipairs({
+        { name = "starts detection once while unresolved", state = "unknown", detecting = false, hello = 1 },
+        { name = "does not duplicate pending detection", state = "unknown", detecting = true, hello = 0 },
+        { name = "does not restart a present bridge", state = "present", detecting = false, hello = 0 },
+        { name = "does not restart an absent bridge", state = "absent", detecting = false, hello = 0 },
+    }) do
+        it(scenario.name, function()
+            NS.bridgeState = scenario.state
+            NS.bridgeDetecting = scenario.detecting
+            NS.CB_SetSelfBotActive(true)
+            NS.CB_SetSelfBotActive(true)
+            local hello = 0
+            for _, packet in ipairs(Mock.addon) do
+                if packet.text == "HELLO~1" then hello = hello + 1 end
+            end
+            assert.equals(scenario.hello, hello)
+            if scenario.hello > 0 then
+                assert.equals(UnitName("player"), Mock.addon[1].target)
+            end
+            assert.equals(scenario.state, NS.bridgeState)
+            assert.is_true(NS.selfBotActive)
+        end)
+    end
+
+    for _, name in ipairs(nsNames) do NS[name] = savedNS[name] end
+    for _, name in ipairs(globalNames) do _G[name] = savedGlobals[name] end
+end)
+

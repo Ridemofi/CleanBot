@@ -16,7 +16,7 @@ _G.CleanBotNS = _G.CleanBotNS or {}
 _G.Mock = {
     whispers = {},   -- recorded SendChatMessage(..., "WHISPER", ...)  → { text=, target= }
     chat     = {},   -- recorded SendChatMessage on any other channel  → { text=, channel= }
-    addon    = {},   -- recorded SendAddonMessage                      → { prefix=, text=, channel= }
+    addon    = {},   -- recorded SendAddonMessage                      → { prefix=, text=, channel=, target= }
     onUpdate = {},   -- captured OnUpdate handlers → { frame=, fn= }
     onEvent  = {},   -- captured OnEvent handlers  → { frame=, fn= }
     timers   = {},   -- pending CB_After callbacks  → { elapsed=, delay=, fn= }
@@ -133,8 +133,8 @@ _G.SendChatMessage = function(text, channel, _, target)
         Mock.chat[#Mock.chat + 1] = { text = text, channel = channel }
     end
 end
-_G.SendAddonMessage = function(prefix, text, channel)
-    Mock.addon[#Mock.addon + 1] = { prefix = prefix, text = text, channel = channel }
+_G.SendAddonMessage = function(prefix, text, channel, target)
+    Mock.addon[#Mock.addon + 1] = { prefix = prefix, text = text, channel = channel, target = target }
 end
 
 -- WoW string helpers — aliases of the standard string library used throughout the addon.
