@@ -27,11 +27,11 @@ end
 -- so a callback may safely schedule further timers.
 local timerFrame = CreateFrame("Frame")
 local timers     = {}
-timerFrame:SetScript("OnUpdate", function(self, dt)
+timerFrame:SetScript("OnUpdate", function()
+    local now = GetTime()
     local due
     for t in pairs(timers) do
-        t.elapsed = t.elapsed + dt
-        if t.elapsed >= t.delay then
+        if now >= t.deadline then
             due = due or {}
             due[#due + 1] = t
         end
@@ -48,7 +48,7 @@ end)
 ---@param delay number  Seconds to wait before firing.
 ---@param fn    fun()   Callback to run when the delay elapses.
 NS.CB_After = function(delay, fn)
-    timers[{ elapsed = 0, delay = delay, fn = fn }] = true
+    timers[{ deadline = GetTime() + delay, fn = fn }] = true
 end
 
 -- Shared full-screen mouse-capture frame. Only one drag can be active at a

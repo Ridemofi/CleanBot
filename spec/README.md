@@ -30,7 +30,7 @@ client) installs via `winget install DEVCOM.LuaJIT`:
   like `CB_SplitOnce` and the group iterators are the actual code, not copies), then the
   harness and each spec. **Register new spec files here.** `Mock.silenceCore()` re-stubs
   `CB_Print`/`CB_After` after the core loads so output stays quiet and timers stay drivable
-  via `Mock.tick`.
+  via `Mock.tick`. The timer mock uses the same `GetTime()` deadline calculation as production.
 - `*_spec.lua` — the tests. A spec `dofile`s the addon file under test, then asserts.
 
 ## CI

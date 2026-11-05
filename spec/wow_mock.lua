@@ -19,7 +19,7 @@ _G.Mock = {
     addon    = {},   -- recorded SendAddonMessage                      → { prefix=, text=, channel=, target= }
     onUpdate = {},   -- captured OnUpdate handlers → { frame=, fn= }
     onEvent  = {},   -- captured OnEvent handlers  → { frame=, fn= }
-    timers   = {},   -- pending CB_After callbacks  → { elapsed=, delay=, fn= }
+    timers   = {},   -- pending CB_After callbacks  → { deadline=, fn= }
     now      = 0,    -- value returned by GetTime()
     raid     = 0,    -- GetNumRaidMembers()
     party    = 0,    -- GetNumPartyMembers()
@@ -45,14 +45,14 @@ function Mock.reset()
 end
 
 --- Advances the clock by dt, fires every captured OnUpdate handler with (frame, dt), then
---- fires any CB_After callback whose delay has elapsed — mirrors one client frame.
+--- fires any CB_After callback whose deadline has been reached.
 function Mock.tick(dt)
     Mock.now = Mock.now + dt
     for _, h in ipairs(Mock.onUpdate) do h.fn(h.frame, dt) end
+    local now = GetTime()
     local due = {}
     for _, t in ipairs(Mock.timers) do
-        t.elapsed = t.elapsed + dt
-        if t.elapsed >= t.delay then due[#due + 1] = t end
+        if now >= t.deadline then due[#due + 1] = t end
     end
     for _, t in ipairs(due) do
         for i, x in ipairs(Mock.timers) do if x == t then table.remove(Mock.timers, i); break end end
@@ -154,6 +154,6 @@ _G.strtrim  = function(s) return (s:gsub("^%s*(.-)%s*$", "%1")) end
 function Mock.silenceCore()
     _G.CleanBotNS.CB_Print = function() end
     _G.CleanBotNS.CB_After = function(delay, fn)
-        Mock.timers[#Mock.timers + 1] = { elapsed = 0, delay = delay, fn = fn }
+        Mock.timers[#Mock.timers + 1] = { deadline = GetTime() + delay, fn = fn }
     end
 end
