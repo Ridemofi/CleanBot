@@ -281,7 +281,7 @@ local BRIDGE_RTI_ICONS = {
     ["SKULL"]    = true,
 }
 
--- RUN~FORMATION — IsAllowedFormationName() (case-sensitive, lowercase 8 tokens; "far" excluded)
+-- RUN~FORMATION — IsAllowedFormationName() (case-sensitive, lowercase 9 tokens)
 local BRIDGE_FORMATIONS = {
     ["arrow"]  = true,
     ["queue"]  = true,
@@ -291,6 +291,7 @@ local BRIDGE_FORMATIONS = {
     ["circle"] = true,
     ["chaos"]  = true,
     ["shield"] = true,
+    ["far"]    = true,
 }
 NS.BRIDGE_FORMATIONS = BRIDGE_FORMATIONS
 

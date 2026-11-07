@@ -1338,23 +1338,13 @@ describe("Bridge formations (GET~FORMATIONS and RUN~FORMATION)", function()
 
     it("dispatches RUN~FORMATION~GROUP~~token~formation for allowed formations in group command", function()
         if not NS.CB_SendGroupCommand then dofile("CommandControls.lua") end
-        NS.CB_SendGroupCommand("formation arrow")
-
-        assert.equals(1, #Mock.addon)
-        assert.is_not_nil(Mock.addon[1].text:match("^RUN~FORMATION~GROUP~~%d+%-setform%-%d+~arrow$"))
-        assert.equals("arrow", CleanBot_PartyBots.mirabella.formation)
-        assert.equals("arrow", CleanBot_PartyBots.artemis.formation)
-        assert.equals(0, #Mock.chat)
-    end)
-
-    it("falls back to PARTY/RAID chat broadcast for unsupported formation 'far'", function()
-        if not NS.CB_SendGroupCommand then dofile("CommandControls.lua") end
         NS.CB_SendGroupCommand("formation far")
 
-        assert.equals(0, #Mock.addon)
-        assert.equals(1, #Mock.chat)
-        assert.equals("formation far", Mock.chat[1].text)
-        assert.equals("PARTY", Mock.chat[1].channel)
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~FORMATION~GROUP~~%d+%-setform%-%d+~far$"))
+        assert.equals("far", CleanBot_PartyBots.mirabella.formation)
+        assert.equals("far", CleanBot_PartyBots.artemis.formation)
+        assert.equals(0, #Mock.chat)
     end)
 
     it("whispers formation ? when bridge is absent", function()
