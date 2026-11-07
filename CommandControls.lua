@@ -190,7 +190,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     -- per-click via StaticPopup_Show's data arg and read back in OnAccept.
     if not StaticPopupDialogs["CLEANBOT_AUTO_GEAR"] and NS.CB_RegisterConfirmPopup then
         NS.CB_RegisterConfirmPopup("CLEANBOT_AUTO_GEAR",
-            "Replace all of %s equipment with auto-selected gear?",
+            "Upgrade %s equipment with auto-selected gear?",
             function(_, data) if data and data.onConfirm then data.onConfirm() end end)
     end
 
@@ -285,7 +285,7 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
     NS.CB_AnchorBelow(maintenanceBtn, summonBtn)
 
     -- Equip Upgrades ("equip upgrade"): equips stat upgrades found in the bot's bags. Non-destructive
-    -- (only swaps in improvements), so no confirmation — unlike Auto Gear which re-gears wholesale.
+    -- (only swaps in improvements), so no confirmation is required.
     -- Changes gear, so refetch equipment afterward (queueEquipRefresh) to update the paperdoll/model.
     local autoEquipBtn = NS.CB_CreateButton(parent, "CleanBotCmdAutoEquipBtn_" .. tag,
         "Equip Upgrades", 120, 24, function() send("equip upgrade"); queueEquipRefresh() end)
@@ -293,8 +293,8 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
         "Equips stat upgrades found in the bot's bags. Only swaps in improvements — never downgrades or unequips, so it's safe to use any time.")
     NS.CB_AnchorBelow(autoEquipBtn, maintenanceBtn)
 
-    -- Auto Gear (col 1): auto-equip a fresh gear set ("autogear"). Destructive (replaces all
-    -- equipment), so it's gated behind a Yes/No confirmation naming the target.
+    -- Auto Gear (col 1): auto-equip gear upgrades ("autogear"). Gated behind a Yes/No confirmation
+    -- naming the target to avoid unintended gear changes.
     local autoGearBtn = NS.CB_CreateButton(parent, "CleanBotCmdAutoGearBtn_" .. tag,
         "Auto Gear", 120, 24, function()
             StaticPopup_Show("CLEANBOT_AUTO_GEAR",
@@ -302,11 +302,11 @@ NS.CB_BuildPartyRaidCommands = function(parent, tag, send, describeTarget, forma
                 { onConfirm = function() send("autogear"); queueEquipRefresh() end })
         end)
     NS.CB_SetTooltip(autoGearBtn, "Auto Gear",
-        "Replaces the bot's entire equipment with an auto-selected gear set, re-gearing from scratch. Destructive — you'll be asked to confirm first.")
+        "Automatically equips gear upgrades for the bot. You'll be asked to confirm first.")
     NS.CB_AnchorBelow(autoGearBtn, autoEquipBtn)
 
     -- Column 2: Roll / Revive / Release / Eat-Drink.
-    local rollBtn = mkBtn("Roll", "Roll", "roll")   -- bot does a /random 0-100
+    local rollBtn = mkBtn("Roll", "Roll", "roll")   -- bot does a /random 1-100
     NS.CB_AnchorAhead(rollBtn, summonBtn)
 
     local reviveBtn = mkBtn("Revive", "Revive", "revive")

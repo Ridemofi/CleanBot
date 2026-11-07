@@ -585,9 +585,9 @@ NS.CLASS_STRATEGIES = {
                 readonly = true,
                 strategies = {
                     -- These are the bot's actual reported combat-strategy tokens
-                    -- (BearDruidStrategy:getName() == "bear", etc.), not the generic
-                    -- melee/caster/heal roles — druid never registers those, so the
-                    -- read-only display could never match the co? reply.
+                    -- (BearDruidStrategy:getName() == "bear", etc.), not generic
+                    -- roles like melee/caster (which druid never registers) or "heal"
+                    -- (which aliases resto in C++, but the bot reports as "resto").
                     { cmd = "bear",    field = "bear",    name = "Guardian (Bear)",
                       desc = "Active strategy set by the bot's talents — Feral tank in Bear Form" },
                     { cmd = "cat",     field = "cat",     name = "Feral (Cat)",
