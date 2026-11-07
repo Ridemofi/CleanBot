@@ -861,7 +861,7 @@ NS.CleanBot_BuildSettingsTab = function()
     NS.CB_AnchorBelow(actionBarHeader, questRewardCB)
 
     local actionBarCB = NS.CB_CreateLabeledCheckBox(otherChild, "CleanBotActionBarCB", "Show Action Bar",
-        "Show a small standalone bar of bot-command buttons (Summon, Passive). Also toggled by right-clicking the minimap icon.")
+        "Show a small standalone bar of bot-command buttons. Also toggled by right-clicking the minimap icon.")
     actionBarCB:SetChecked(NS.actionBarShown == true)
     NS.CB_AnchorBelow(actionBarCB, actionBarHeader)
     actionBarCB:SetScript("OnClick", function(self)

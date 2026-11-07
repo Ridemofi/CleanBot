@@ -87,7 +87,7 @@ NS.CleanBot_BuildIndividualTab = function()
     NS.individualStratPanel:SetPoint("TOPLEFT",     NS.individualModelPanel, "TOPRIGHT",    NS.MODEL_GAP, 0)
     NS.individualStratPanel:SetPoint("BOTTOMRIGHT", NS.individualContent,    "BOTTOMRIGHT", 0, 0)
 
-    -- "Reset Strategies": a single shared button that floats in the empty right portion of the bot tab
+    -- "Reset AI": a single shared button that floats in the empty right portion of the bot tab
     -- bar (the BOT_BAR_H strip above the content), horizontally centered over the strategy panel — so it
     -- sits above the inner tabs without taking room from them. Parented to the strat panel so it hides
     -- with it on collapse; RefreshTabs shows it only when there are bots. Acts on the SELECTED bot: it
@@ -95,8 +95,8 @@ NS.CleanBot_BuildIndividualTab = function()
     -- the cached strategies/formation/loot to defaults (instant repaint via CB_UpdateTabData) — then
     -- CB_RereadBotState re-reads the bot's real post-reset state so the replies reconcile (or correct
     -- the display if the reset didn't take).
-    NS.individualResetBtn = NS.CB_CreateButton(NS.individualStratPanel, "CleanBotResetStrategiesBtn",
-        "Reset Strategies", 140, 22, function()
+    NS.individualResetBtn = NS.CB_CreateButton(NS.individualStratPanel, "CleanBotResetAiBtn",
+        "Reset AI", 140, 22, function()
             local key = NS.selectedBotKey
             local e   = key and CleanBot_PartyBots[key]
             local bn  = e and e.name
@@ -116,8 +116,8 @@ NS.CleanBot_BuildIndividualTab = function()
     NS.individualResetBtn:ClearAllPoints()
     NS.individualResetBtn:SetPoint("CENTER", NS.individualStratPanel, "TOP", 0, NS.BOT_BAR_H / 2)
     NS.individualResetBtn:SetFrameLevel(NS.botTabBar:GetFrameLevel() + 5)
-    NS.CB_SetTooltip(NS.individualResetBtn, "Reset Strategies",
-        "Reset the selected bot's AI to defaults — clears its strategies, formation, movement, and other settings.")
+    NS.CB_SetTooltip(NS.individualResetBtn, "Reset AI",
+        "Reset the selected bot's AI to server defaults and clear saved changes (does not reset all settings).")
     NS.individualResetBtn:Hide()
 
     -- Collapsed width = model panel + frame padding + panel padding on both sides.
@@ -1965,7 +1965,7 @@ NS.CleanBot_RefreshTabs = function()
     if NS.individualEmptyLabel then
         NS.individualEmptyLabel:SetText(#desired == 0 and "No bots found in your party or raid." or "")
     end
-    -- The shared Reset Strategies button only makes sense with a selected bot.
+    -- The shared Reset AI button only makes sense with a selected bot.
     if NS.individualResetBtn then
         if #desired == 0 then NS.individualResetBtn:Hide() else NS.individualResetBtn:Show() end
     end

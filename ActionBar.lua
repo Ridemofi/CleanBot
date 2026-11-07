@@ -1121,7 +1121,7 @@ local SLOTS = {
         { id = "release", icon = "Interface\\Icons\\Spell_Holy_GuardianSpirit", title = "Release",
           desc = "Release your bots' spirits when they die.", onClick = function() NS.CB_SendGroupCommand("release") end },
         { id = "revive",  icon = "Interface\\Icons\\Spell_Holy_Resurrection", title = "Revive",
-          desc = "Revive your bots from their corpses.", onClick = function() NS.CB_SendGroupCommand("revive") end },
+          desc = "Revive your bots at the spirit healer.", onClick = function() NS.CB_SendGroupCommand("revive") end },
     } },
 
     -- Recruit: a NESTED, non-reorderable flyout (built by CB_CreateRecruitButton, not from `actions`).

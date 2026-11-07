@@ -73,7 +73,7 @@ action name in `ChatActionContext.h`.**
 | `cast <spell> [on <target>]` / `cast 13262 <link>` | `cast` | `CastCustomSpellAction` (`cast <spell> [target]`) | ✅ (Spellbook dual-click casting and inventory "Disenchant" menu) |
 | `r <link>` | `r` | `TriggerNode("r")` — reward (`RewardAction`) | ✅ (quest reward picker — completes quest choosing reward itemlink) |
 | `los gos` | `los` | `TriggerNode("los")` — line of sight objects | ✅ (whisper fallback for nearby interactive game objects query) |
-| `reset botAI` | `reset botAI` | `supported` (`ResetAiAction`) | ✅ ("Reset Strategies" button — clears saved AI settings and restores strategy defaults from Individual tab) |
+| `reset botAI` | `reset botAI` | `supported` (`ResetAiAction`) | ✅ ("Reset AI" button — clears saved AI settings and restores strategy defaults from Individual tab) |
 
 ---
 
@@ -111,7 +111,7 @@ action name in `ChatActionContext.h`.**
 | `cast <spell> [on <target>]` / `cast 13262 <link>` | ✅ | Dispatched for Spellbook dual-click casting and inventory disenchanting (`CastCustomSpellAction`). |
 | `r <link>` | ✅ | Quest reward picker (`RewardAction`). Sends itemlink of the chosen reward on turn-in. |
 | `los gos` | ✅ | Whisper fallback for querying nearby interactive game objects (`TellLosAction`). |
-| `reset botAI` | ✅ | "Reset Strategies" button on Individual tab header (`ResetAiAction`). Clears saved repository settings and rebuilds combat/non-combat/dead strategy sets from the server defaults. It does not explicitly reset the current context's formation or saved movement positions. Bare whisper `reset` instead runs `PlayerbotAI::Reset(true)`, which cancels logout, stops movement and spellcasting, and resets reactions, targets, travel, and action engines while **preserving** current strategies. |
+| `reset botAI` | ✅ | "Reset AI" button on Individual tab header (`ResetAiAction`). Clears saved repository settings and rebuilds combat/non-combat/dead strategy sets from the server defaults. It does not explicitly reset the current context's formation or saved movement positions. Bare whisper `reset` instead runs `PlayerbotAI::Reset(true)`, which cancels logout, stops movement and spellcasting, and resets reactions, targets, travel, and action engines while **preserving** current strategies. |
 
 ### co / nc operators (`ChangeStrategyAction.cpp`)
 Prefix operators on each strategy token:

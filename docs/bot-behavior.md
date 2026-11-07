@@ -55,7 +55,7 @@ The **Group** tab lets you manage and command multiple bots simultaneously acros
 ## Interface utilities
 
 - **Collapse / Expand (`>` / `<`):** A toggle tab on the right edge of CleanBotFrame (`CleanBotIndividualExpandBtn`) collapses the strategy panels, leaving a compact view of only the 3D model and paperdoll gear.
-- **Reset Strategies:** A utility button in the Individual tab header; sends `reset botAI` to clear the bot's saved AI settings and restore its strategy sets to the server defaults.
+- **Reset AI:** A utility button in the Individual tab header; sends `reset botAI` to clear the bot's saved AI settings and restore its strategy sets to the server defaults.
 
 ## Want the full list?
 
