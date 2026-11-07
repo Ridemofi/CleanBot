@@ -88,7 +88,7 @@ describe("Overhear command classification", function()
         assert.equals("movement", kind); assert.equals("follow", verb); assert.equals("", rest)
         assert.equals("movement", k("stay"))
         assert.equals("movement", k("runaway"))
-        assert.equals("movement", k("flee from adds"))   -- multi-word movement strategy
+        assert.equals("movement", k("guard"))
         assert.equals("movement", k("FOLLOW"))           -- case-insensitive
     end)
 

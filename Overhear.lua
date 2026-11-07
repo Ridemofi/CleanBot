@@ -78,8 +78,8 @@ NS.CB_ClassifyChatCommand = function(msg)
     if not msg then return nil end
     local trimmed = msg:gsub("^%s*(.-)%s*$", "%1")
     if trimmed == "" then return nil end
-    -- Bare movement one-shot (whole message is the command, e.g. "follow", "stay", "flee from adds").
-    -- Checked before the verb split so multi-word "flee from adds" matches; "follow me" does NOT.
+    -- Bare movement one-shot (whole message is the command, e.g. "follow", "stay", "guard", "runaway").
+    -- Checked before the verb split so bare commands match; "follow me" does NOT.
     local low = strlower(trimmed)
     if NS.CB_MovementField(low) then return "movement", low, "" end
     local verb, rest = strmatch(trimmed, "^(%S+)%s*(.*)$")
@@ -117,7 +117,7 @@ local function ensureSets()
     for _, grp in ipairs(NS.NC_STRATEGIES or {}) do
         if grp.options then for _, o in ipairs(grp.options) do lootSet[o.value] = true end end
     end
-    -- token (chat one-shot, e.g. "follow", "flee from adds") → strategy field (e.g. "mFollow").
+    -- token (chat one-shot, e.g. "follow", "stay") → strategy field (e.g. "mFollow").
     for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do movementSet[m.cmd] = m.field end
 end
 

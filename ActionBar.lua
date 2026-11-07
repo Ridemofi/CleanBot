@@ -159,7 +159,7 @@ local function revertRunaway()
     for key, info in pairs(pendingRunawayRevert) do
         local e = CleanBot_PartyBots[key]
         if e then
-            local field = info.prev or nil   -- false → nil (Free Roam, clears all five)
+            local field = info.prev or nil   -- false → nil (Free Roam, clears all four)
             e.combat = e.combat or {}
             for _, m in ipairs(NS.MOVEMENT_STRATEGIES or {}) do e.combat[m.field] = (m.field == field) end
             NS.CB_SendBotCommand(info.name, "co " .. NS.CB_MovementToggleString(field))

@@ -19,20 +19,19 @@ local NS = CleanBotNS
 -- automatically below for any callers that still need them.
 -- ============================================================
 
--- The five movement strategies (MovementStrategyContext, supportsSiblings=true →
+-- The four movement strategies (MovementStrategyContext, supportsSiblings=true →
 -- mutually exclusive: adding one drops the rest). Shared by TWO exclusive dropdowns —
 -- one in the combat list, one in the non-combat list — because the lists are
 -- independent engines: a fresh bot has "follow" in its NON-COMBAT defaults only
 -- (AiFactory::AddDefaultNonCombatStrategies), while the combat engine also acts on
 -- movement (e.g. PlayerbotAI::ChangeEngineOnCombat snapshots a combat "stay" position),
 -- so the two genuinely differ. Each dropdown reads/writes its own state via the normal
--- exclusive-dropdown path; a nil selection ("Free Roam") clears all five.
+-- exclusive-dropdown path; a nil selection ("Free Roam") clears all four.
 NS.MOVEMENT_STRATEGIES = {
     { cmd = "follow",         field = "mFollow",   name = "Follow",         desc = "Follow the master at the configured distance" },
     { cmd = "stay",           field = "mStay",     name = "Stay",           desc = "Hold current position; return to it if moved" },
     { cmd = "guard",          field = "mGuard",    name = "Guard",          desc = "Guard this spot — engage what approaches, then return" },
     { cmd = "runaway",        field = "mRunaway",  name = "Run Away",       desc = "Keep distance from enemies" },
-    { cmd = "flee from adds", field = "mFleeAdds", name = "Flee from Adds", desc = "Retreat from add packs" },
 }
 
 NS.STRATEGIES = {
@@ -62,8 +61,8 @@ NS.STRATEGIES = {
         dpsCmdByClass = { PALADIN = "dps", PRIEST = "dps" },
         strategies = {
             -- cmdByClass: classes that implement the role under a different token.
-            -- Druid/DK have no literal "tank" rotation token — they tank via their
-            -- form/spec strategy (bear / blood). Druid heals via "resto", not "heal".
+            -- Druid/DK register "tank" as an alias of "bear"/"blood"; send canonical tokens.
+            -- Druid heals via "resto" (which "heal" aliases in C++).
             { cmd = "tank", field = "isTank",   name = "Tank",   desc = "Hold threat so enemies don't attack the group",
               cmdByClass = { DRUID = "bear", DEATHKNIGHT = "blood" } },
             { cmd = "heal", field = "isHealer", name = "Healer", desc = "Focus on healing the group",
@@ -71,7 +70,7 @@ NS.STRATEGIES = {
             -- Paladin's offheal IS a sibling of tank/dps/heal (OffhealRetPaladinStrategy =
             -- full ret damage + emergency heals, replacing the plain ret rotation), so it
             -- belongs in this exclusive list — but only Paladin registers it that way.
-            -- Druid's offheal is independent and lives in its own ClassData "Support" group.
+            -- Druid's offheal is independent and lives in the generic Role sub-sections.
             { cmd = "offheal", field = "offheal", name = "Off-Heal", classOnly = "PALADIN",
               desc = "Retribution DPS that also throws emergency party heals" },
         },
@@ -86,7 +85,7 @@ NS.STRATEGIES = {
                   noneDesc = "Default rotation — neither AoE cleave nor single-target priority",
                   strategies = {
                       { cmd = "focus", field = "focusFire",  name = "Focus Fire",
-                        desc = "Focus on single target spells — no AoE or debuffs (healing is unaffected)" },
+                        desc = "Focus on single target spells — no AoE or attacker debuffs (healing is unaffected)" },
                       { cmd = "aoe",   field = "aoeTarget", name = "AoE Rotation",
                         desc = "Use the class appropriate AoE rotation — cleave / multi-target spells" },
                   } },
@@ -175,6 +174,7 @@ NS.STRATEGIES = {
             { cmd = "kite",      field = "kite",             name = "Kite",               desc = "Run from enemies while you hold their aggro" },
             { cmd = "avoid aoe", field = "avoidAoe",         name = "Avoid AoE",          desc = "Automatically avoid harmful AoE spells" },
             { cmd = "behind",    field = "stayBehindTarget", name = "Stay Behind Target", desc = "Move to target's back when not behind" },
+            { cmd = "adds",      field = "avoidAdds",        name = "Avoid Adds",         desc = "Attempt to retreat when potential adds are detected; recall the pet if present." },
         },
     },
     {
