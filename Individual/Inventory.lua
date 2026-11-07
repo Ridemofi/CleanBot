@@ -512,7 +512,7 @@ local function CB_ShowInvMenu(cell, key)
                         sent = NS.CB_BridgeDepositItem(entry.name, "GBANK_DEPOSIT", cell)
                     end
                 else
-                    NS.CB_SendBotCommand(entry.name, "guild bank " .. NS.CB_CleanItemLink(cell.itemLink))
+                    NS.CB_SendBotCommand(entry.name, "gb " .. NS.CB_CleanItemLink(cell.itemLink))
                     NS.CB_ScheduleReconcile(key, entry.name)
                     sent = true
                 end
@@ -837,7 +837,7 @@ StaticPopupDialogs["CLEANBOT_NO_BANKER"] = {
     hideOnEscape = true,
 }
 
--- Shown when a "guild bank <item>" deposit fails (raised from the guild-bank whisper handler in
+-- Shown when a "gb <item>" deposit fails (raised from the guild-bank whisper handler in
 -- Bridge.lua): bot not in your guild, no guild vault nearby, or no deposit rights. %s = bot name.
 StaticPopupDialogs["CLEANBOT_NO_GUILD_BANK"] = {
     text         = "%s couldn't deposit to the guild bank. The bot must be in your guild, standing "

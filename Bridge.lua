@@ -217,10 +217,8 @@ NS.CB_SetSelfBotActive = function(active)
         -- stores the combat reply then chains "nc ?" — a full read, same as the probe path.
         -- Always whispers (queries are never bridged), and self-whisper works here.
         local entry = CleanBot_PartyBots[key]
-        if entry then
-            entry.awaitingCo = true
-            NS.CB_SendBotCommand(name, "co ?")
-        end
+        entry.awaitingCo = true
+        NS.CB_SendBotCommand(name, "co ?")
     elseif key then
         CleanBot_PartyBots[key] = nil
     end
@@ -268,8 +266,7 @@ local BRIDGE_LOOT_CMDS = {
     ["ll all"]   = true,
     ["ll normal"] = true,
     ["ll gray"]  = true,
-    ["ll quest"] = true,
-    ["ll skill"] = true,
+    ["ll disenchant"] = true,
 }
 
 -- RUN~RTI — IsAllowedRTIIcon()
@@ -1973,7 +1970,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
-        -- Guild-bank deposit failure ("guild bank <item>" from the inventory menu). The reply is
+        -- Guild-bank deposit failure ("gb <item>" from the inventory menu). The reply is
         -- hidden from chat by the reply-window filter, so surface the reason as a popup. Gated on
         -- entry (a managed bot), so a human whisper can't trip it. Success ("put to guild bank")
         -- falls through — hidden by the filter and ignored by parsing.
@@ -2317,8 +2314,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
         elseif msg and strsub(msg, 1, 7) == "DETAIL~" then
-            local name, className = strmatch(msg, "^DETAIL~([^~]+)~[^~]+~[^~]+~([^~]+)~")
-            if name and className then
+            local name, r2 = NS.CB_SplitOnce(strsub(msg, 8), "~")
+            local race, r3 = NS.CB_SplitOnce(r2, "~")
+            local gender, r4 = NS.CB_SplitOnce(r3, "~")
+            local className = NS.CB_SplitOnce(r4, "~")
+            if name ~= "" and race ~= "" and gender ~= "" and className ~= "" and strfind(r4, "~", 1, true) then
                 local classKey = strupper(className)
                 classKey = gsub(classKey, "%s+", "")
                 local key      = strlower(name)
@@ -2919,10 +2919,15 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 end
             end
 
-        elseif msg and msg:match("^QUEST_ABANDON_TARGET_RESULT~") then
-            local token, rawName, questId, status, reason, abandoned = msg:match(
-                "^QUEST_ABANDON_TARGET_RESULT~([^~]+)~([^~]+)~(%d+)~([^~]+)~([^~]*)~(%d+)$")
-            local request = token and pendingQuestAbandons[token]
+        elseif msg and strsub(msg, 1, 28) == "QUEST_ABANDON_TARGET_RESULT~" then
+            local token, r2 = NS.CB_SplitOnce(strsub(msg, 29), "~")
+            local rawName, r3 = NS.CB_SplitOnce(r2, "~")
+            local questId, r4 = NS.CB_SplitOnce(r3, "~")
+            local status, r5 = NS.CB_SplitOnce(r4, "~")
+            local reason, abandoned = NS.CB_SplitOnce(r5, "~")
+            local valid = token ~= "" and rawName ~= "" and status ~= ""
+                and strfind(questId, "^%d+$") and strfind(abandoned, "^%d+$")
+            local request = valid and pendingQuestAbandons[token]
             if request and strlower(CB_UrlDecode(rawName)) == strlower(request.botName)
                 and tonumber(questId) == request.questId then
                 pendingQuestAbandons[token] = nil

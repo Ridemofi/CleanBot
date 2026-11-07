@@ -60,6 +60,9 @@ describe("CB_BridgeAbandonQuest", function()
         reply(token, "Other", 404, "OK", "OK", 1)
         reply(token, "Bot", 405, "OK", "OK", 1)
         Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUEST_ABANDON_TARGET_RESULT~" .. token)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "QUEST_ABANDON_TARGET_RESULT~" .. token .. "~Bot~404~OK~OK~1~extra")
+        reply(token, "Bot", "4e2", "OK", "OK", 1)
+        reply(token, "Bot", 404, "OK", "OK", "1.0")
         assert.equals(0, calls)
         reply(token, "Bot", 404, "OK", "OK", 1)
         assert.equals(1, calls)
@@ -964,7 +967,7 @@ describe("Inventory visual swaps preserve exact item commands", function()
         { label = "Sell", id = 200, count = 7, opcode = "ITEM_SELL", chat = "s " },
         { label = "Disenchant", id = 100, count = 1, chat = "cast 13262 " },
         { label = "Deposit to Guild Bank", id = 200, count = 7,
-            opcode = "ITEM_DEPOSIT_EXACT", extra = "~GBANK_DEPOSIT", chat = "guild bank " },
+            opcode = "ITEM_DEPOSIT_EXACT", extra = "~GBANK_DEPOSIT", chat = "gb " },
         { label = "Destroy", id = 100, count = 1, opcode = "ITEM_DESTROY", chat = "destroy " },
     }
     for _, action in ipairs(actions) do
@@ -2581,3 +2584,41 @@ describe("SelfBot bridge routing", function()
 end)
 
 NS.CleanBot_RefreshTabs = selfBotOriginalRefreshTabs
+
+describe("DETAIL packet parsing", function()
+    local originalGsub = _G.gsub
+    before_each(function()
+        Mock.reset()
+        _G.gsub = string.gsub
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        CleanBot_PartyBots = {}
+    end)
+
+    it("updates identity and class while preserving cached bot data", function()
+        local entry = { name = "Bot", class = "WARRIOR", formation = "follow" }
+        CleanBot_PartyBots.bot = entry
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "DETAIL~Bot~1~0~Death Knight~80~1~0~200")
+        assert.equals(entry, CleanBot_PartyBots.bot)
+        assert.equals("DEATHKNIGHT", entry.class)
+        assert.equals("follow", entry.formation)
+    end)
+
+    it("ignores missing identity fields and truncated class fields", function()
+        local packets = {
+            "DETAIL~Bot~1~0~WARRIOR",
+            "DETAIL~Bot~~0~WARRIOR~80",
+            "DETAIL~Bot~1~~WARRIOR~80",
+            "DETAIL~Bot~1~0~~80",
+            "DETAIL~~1~0~WARRIOR~80",
+        }
+        for _, packet in ipairs(packets) do
+            Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", packet)
+        end
+        assert.is_nil(next(CleanBot_PartyBots))
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "DETAIL~Bot~1~0~WARRIOR~80")
+        assert.equals("WARRIOR", CleanBot_PartyBots.bot.class)
+    end)
+
+    _G.gsub = originalGsub
+end)
