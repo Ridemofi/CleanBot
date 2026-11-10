@@ -33,7 +33,12 @@ The responses are `SELF_BOT_STATE~<token>~<OK/ERR>~<0/1>~<reason>` and
 `SELF_BOT_RESULT~<token>~<OK/ERR>~<0/1>~<reason>`. CleanBot validates the response
 against its latest request and updates the checkbox from the returned state, including
 valid error responses. Requests time out after **5 seconds**; errors and timeouts do not
-trigger a chat retry.
+trigger a chat retry. When SelfBot is confirmed active with bridge present, CleanBot queries its
+strategies silently with `GET~SELF_STRATEGY_STATE~<token>`, receiving standard `STATE_BEGIN~` /
+`STATE_ITEM~` / `STATE_END~` framed packets, and directly queries its formation (`formation ?`) and
+loot strategy (`ll ?`) via serialized silent whispers (since `GET~FORMATIONS~GROUP` excludes the
+local player and the bridge lacks a loot query opcode); falls back to whispering `co ?` (which chains `nc ?`)
+when the bridge is absent.
 
 When the effective bridge state is not `present`, each click immediately sends
 `.playerbots bot self` through chat and the server's system message updates the checkbox.
@@ -133,6 +138,7 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~PROFESSION~<botName>` | Bot's learned professions and current/max skill ranks | `PROFESSION~` |
 | `GET~PROFESSION_RECIPES~<botName>~<skillId>~<token>` | Recipes learned by bot for specified skillId | `PROFESSION_RECIPES_BEGIN~` / `PROFESSION_RECIPES_ITEM~` / `PROFESSION_RECIPES_END~` |
 | `GET~GAMEOBJECTS~<botName>~<token>` | Nearby interactive game objects (doors, chests, nodes) | `GAMEOBJECTS_BEGIN~` / `GAMEOBJECTS_ITEM~` / `GAMEOBJECTS_END~` / `GAMEOBJECTS_DONE~` |
+| `GET~SELF_STRATEGY_STATE~<token>` | Combat and non-combat strategies for SelfBot | `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` |
 
 `GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
 `CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).

@@ -2571,6 +2571,82 @@ describe("SelfBot bridge routing", function()
         assert.equals(1, #Mock.chat)
         assert.equals(".playerbots bot self", Mock.chat[1].text)
     end)
+
+    it("requests SelfBot strategy state via bridge and queries formation and loot without co/nc chat", function()
+        NS.bridgeState = "present"
+        NS.bridgeReady = true
+        local beforeAddonCount = #Mock.addon
+        NS.CB_SetSelfBotActive(true)
+        local sentStratToken = nil
+        for i = beforeAddonCount + 1, #Mock.addon do
+            sentStratToken = Mock.addon[i].text:match("^GET~SELF_STRATEGY_STATE~(%S+)$")
+            if sentStratToken then break end
+        end
+        assert.is_not_nil(sentStratToken)
+
+        -- Neither co ? nor nc ? should be whispered (they are handled silently via bridge)
+        for _, whisper in ipairs(Mock.whispers) do
+            assert.is_false(whisper.text == "co ?" or whisper.text == "nc ?")
+        end
+
+        -- Formation is queried directly since GET~FORMATIONS~GROUP excludes local player
+        assert.equals(1, #Mock.whispers)
+        assert.equals("formation ?", Mock.whispers[1].text)
+        assert.equals("TestPlayer", Mock.whispers[1].target)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_BEGIN~" .. sentStratToken .. "~TestPlayer~1~1")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_ITEM~" .. sentStratToken .. "~TestPlayer~C~1~potions")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_ITEM~" .. sentStratToken .. "~TestPlayer~N~1~food")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_END~" .. sentStratToken .. "~TestPlayer~1~1")
+
+        local entry = CleanBot_PartyBots.testplayer
+        assert.is_not_nil(entry)
+        assert.is_true(entry.combat.usePotions)
+        assert.is_true(entry.nonCombat.useFood)
+
+        -- Formation reply populates formation
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Formation: chaos", "TestPlayer")
+        assert.equals("chaos", entry.formation)
+
+        -- Silence tick advances queue to send loot strategy query (ll ?)
+        Mock.tick(0.6)
+        assert.equals(2, #Mock.whispers)
+        assert.equals("ll ?", Mock.whispers[2].text)
+        assert.equals("TestPlayer", Mock.whispers[2].target)
+
+        Mock.fireEvent("CHAT_MSG_WHISPER", "Loot strategy: normal", "TestPlayer")
+        assert.equals("normal", entry.lootStrategy)
+    end)
+
+    it("queries formation ? directly for SelfBot via CB_FetchFormation when bridge is present", function()
+        NS.bridgeState = "present"
+        NS.bridgeReady = true
+        Mock.reset()
+        CleanBot_PartyBots = {
+            testplayer = { name = "TestPlayer" },
+        }
+        local entry = CleanBot_PartyBots.testplayer
+        NS.CB_FetchFormation(entry)
+
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("formation ?", Mock.whispers[1].text)
+        assert.equals("TestPlayer", Mock.whispers[1].target)
+        assert.is_true(entry.awaitingFormation)
+    end)
+
+    it("falls back to whispering co ? for SelfBot when bridge is absent", function()
+        NS.bridgeState = "absent"
+        NS.CB_SetSelfBotActive(true)
+        local foundCo = false
+        for _, whisper in ipairs(Mock.whispers) do
+            if whisper.text == "co ?" and whisper.target == "TestPlayer" then
+                foundCo = true
+                break
+            end
+        end
+        assert.is_true(foundCo)
+    end)
 end)
 
 NS.CleanBot_RefreshTabs = selfBotOriginalRefreshTabs

@@ -106,6 +106,32 @@ NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strateg
 -- Debug overrides — both are nil/false by default and are toggled via /cbdebug.
 -- nil = auto (follow real handshake); "present" or "absent" = forced override.
 NS.debugBridgeOverride = nil   ---@type string|nil
+
+-- Returns the effective bridge state, respecting NS.debugBridgeOverride.
+-- Use this instead of reading NS.bridgeState directly inside CB_SendBotCommand
+-- so that /cbdebug bridge on/off can exercise both code paths without a real bridge.
+local function CB_EffectiveBridgeState()
+    return NS.debugBridgeOverride or NS.bridgeState
+end
+NS.CB_EffectiveBridgeState = CB_EffectiveBridgeState
+
+-- Uses RAID or PARTY in a group and WHISPER to the player when solo.
+local function CB_SendBridge(msg)
+    if GetNumRaidMembers() > 0 then
+        SendAddonMessage("MBOT", msg, "RAID")
+    elseif GetNumPartyMembers() > 0 then
+        SendAddonMessage("MBOT", msg, "PARTY")
+    else
+        SendAddonMessage("MBOT", msg, "WHISPER", UnitName("player"))
+    end
+end
+
+local tokenSeq = 0
+local function CB_NextToken(prefix)
+    tokenSeq = (tokenSeq or 0) + 1
+    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "tok") .. "-" .. tostring(tokenSeq)
+end
+NS.CB_NextToken = CB_NextToken
 -- When true, CB_SendBotCommand prints commands to chat instead of sending them.
 NS.debugSimulate       = false ---@type boolean
 -- When true, strategy toggles log any optimistic-vs-actual mismatch after the
@@ -213,12 +239,20 @@ NS.CB_SetSelfBotActive = function(active)
 
         NS.CB_StartBridgeDetection()
 
-        -- Read the player's actual strategies. A bare "co ?" (awaitingCo, NOT coVerifyOnly)
-        -- stores the combat reply then chains "nc ?" — a full read, same as the probe path.
-        -- Always whispers (queries are never bridged), and self-whisper works here.
+        -- Read the player's actual strategies.
+        -- Bridge path: request via GET~SELF_STRATEGY_STATE (silent framed STATE_ packets),
+        -- plus direct queries for formation and loot strategy (not covered by bridge for player).
+        -- Whisper path (fallback): "co ?" chains "nc ?".
         local entry = CleanBot_PartyBots[key]
-        entry.awaitingCo = true
-        NS.CB_SendBotCommand(name, "co ?")
+        if CB_EffectiveBridgeState() == "present" then
+            local token = CB_NextToken("selfstrat")
+            CB_SendBridge("GET~SELF_STRATEGY_STATE~" .. token)
+            NS.CB_FetchFormation(entry)
+            NS.CB_FetchLootStrategy(entry)
+        else
+            entry.awaitingCo = true
+            NS.CB_SendBotCommand(name, "co ?")
+        end
     elseif key then
         CleanBot_PartyBots[key] = nil
     end
@@ -328,25 +362,6 @@ local function CB_GetBridgeOpcode(command)
     return nil
 end
 
--- Returns the effective bridge state, respecting NS.debugBridgeOverride.
--- Use this instead of reading NS.bridgeState directly inside CB_SendBotCommand
--- so that /cbdebug bridge on/off can exercise both code paths without a real bridge.
-local function CB_EffectiveBridgeState()
-    return NS.debugBridgeOverride or NS.bridgeState
-end
-NS.CB_EffectiveBridgeState = CB_EffectiveBridgeState
-
--- Uses RAID or PARTY in a group and WHISPER to the player when solo.
-local function CB_SendBridge(msg)
-    if GetNumRaidMembers() > 0 then
-        SendAddonMessage("MBOT", msg, "RAID")
-    elseif GetNumPartyMembers() > 0 then
-        SendAddonMessage("MBOT", msg, "PARTY")
-    else
-        SendAddonMessage("MBOT", msg, "WHISPER", UnitName("player"))
-    end
-end
-
 -- Command-reply window: bots confirm nearly every command with a whisper — a one-line ack
 -- ("Picking ...", "Wait for attack time set to ...") or a multi-line dump (items/quests/spec).
 -- Rather than enumerate every reply string, we open a per-bot window the instant we whisper a
@@ -398,13 +413,6 @@ local function CB_TagSelfGroup(text)
     list[#list + 1] = GetTime()
 end
 NS.CB_TagSelfGroup = CB_TagSelfGroup
-
-local tokenSeq = 0
-local function CB_NextToken(prefix)
-    tokenSeq = (tokenSeq or 0) + 1
-    return tostring(math.floor(GetTime() * 1000)) .. "-" .. (prefix or "tok") .. "-" .. tostring(tokenSeq)
-end
-NS.CB_NextToken = CB_NextToken
 
 local selfBotRequest
 
@@ -1426,6 +1434,15 @@ end
 NS.CB_FetchFormation = function(entry, force)
     if not entry or not entry.name then return end
     if CB_EffectiveBridgeState() == "present" then
+        if entry.name == UnitName("player") then
+            -- MultiBotBridge GET~FORMATIONS~GROUP excludes the local player (SelfBot),
+            -- so query the player directly via whisper command.
+            if (entry.formation and not force) or entry.awaitingFormation then return end
+            entry.awaitingFormation = true
+            entry.formationTimeout  = 0
+            NS.CB_SendBotCommand(entry.name, "formation ?")
+            return
+        end
         if (entry.formation and not force) or NS.formationsPending then return end
         NS.CB_FetchFormationsBridge(force)
         return
