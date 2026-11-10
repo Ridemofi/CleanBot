@@ -3257,21 +3257,6 @@ NS.CB_GetProfessionsFrame = function(key, botName)
         end)
     end
 
-    local EQUIP_SLOT_NAMES = {
-        [1]  = "Head",
-        [3]  = "Shoulders",
-        [5]  = "Chest",
-        [6]  = "Waist",
-        [7]  = "Legs",
-        [8]  = "Feet",
-        [9]  = "Wrist",
-        [10] = "Hands",
-        [11] = "Finger 1",
-        [12] = "Finger 2",
-        [15] = "Back",
-        [16] = "Main Hand",
-        [17] = "Off Hand",
-    }
     local EQUIP_SLOT_ORDER = { 16, 17, 15, 5, 9, 10, 8, 11, 12, 1, 3, 6, 7 }
 
     local ENCHANTING_VELLUM_IDS = {
@@ -3369,7 +3354,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                 for _, slotId in ipairs(EQUIP_SLOT_ORDER) do
                     local link = GetInventoryItemLink(unit, slotId)
                     if link then
-                        local name, _, quality, _, _, _, _, _, _, texture = GetItemInfo(link)
+                        local name, _, quality, _, _, _, _, _, equipLoc, texture = GetItemInfo(link)
                         local itemId = tonumber(link:match("item:(%d+)"))
                         if itemId and itemId > 0 then
                             table.insert(equippedItems, {
@@ -3377,7 +3362,7 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                                 slotId     = slotId,
                                 targetBag  = 255,
                                 targetSlot = slotId - 1,
-                                slotName   = EQUIP_SLOT_NAMES[slotId] or ("Slot " .. slotId),
+                                slotName   = (equipLoc and _G[equipLoc]) or "Gear",
                                 itemId     = itemId,
                                 link       = link,
                                 name       = name or ("Item " .. itemId),
@@ -3397,15 +3382,13 @@ NS.CB_GetProfessionsFrame = function(key, botName)
                         local isVellum = ENCHANTING_VELLUM_IDS[it.itemId]
                         local isEnchantableGear = equipLoc and ENCHANTABLE_EQUIP_LOCS[equipLoc]
                         if isVellum or isEnchantableGear then
-                            local bagText = (it.bag == 0) and "Backpack" or string.format("Bag %d", it.bag)
-                            if it.count and it.count > 1 then
-                                bagText = string.format("%s (x%d)", bagText, it.count)
-                            end
+                            local slotText = isVellum and ((it.count and it.count > 1) and string.format("Vellum (x%d)", it.count) or "Vellum")
+                                or _G[equipLoc] or "Gear"
                             table.insert(bagItems, {
                                 isEquipped = false,
                                 targetBag  = it.bag,
                                 targetSlot = it.slot,
-                                slotName   = bagText,
+                                slotName   = slotText,
                                 itemId     = it.itemId,
                                 link       = it.link,
                                 name       = name or (isVellum and "Enchanting Vellum") or ("Item " .. it.itemId),
