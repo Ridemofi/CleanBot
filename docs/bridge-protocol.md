@@ -49,6 +49,15 @@ use `ExecuteSilentBotCommand()`, which calls `botAI->HandleCommand` with
 `CHAT_MSG_WHISPER` and a silent-routing prefix. Other `RUN~` endpoints, including
 formation, inventory, and crafting, use their dedicated handlers.
 
+### Field Encoding & Escaping
+
+All fields in `MBOT` messages use `~` as the field delimiter. Any dynamic text fields (such as character names, commands, item lines, or formation tokens) are escaped using `CB_UrlEncode(value)` before dispatch. This percent-encodes:
+- `%` → `%25`
+- `~` → `%7E` (prevents premature field splitting by the server's `SplitFields`)
+- `\r` → `%0D` and `\n` → `%0A`
+
+The server (`MultiBotBridge.cpp`) processes incoming text fields with `TryUrlDecodeField` / `UrlDecodeField`, restoring the original characters. Fixed protocol constants and request tokens (`CB_NextToken`) are alphanumeric and remain unencoded.
+
 ---
 
 ## Handshake & state machine

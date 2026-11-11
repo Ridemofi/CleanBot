@@ -17,6 +17,17 @@ local function CB_UrlDecode(s)
     return (s:gsub("%%(%x%x)", function(hex) return string.char(tonumber(hex, 16)) end))
 end
 
+-- URL-encodes a field for bridge serialization (escapes %, ~, and newlines).
+---@param value any Value to encode.
+---@return string The encoded string.
+local function CB_UrlEncode(value)
+    value = tostring(value or "")
+    return (value:gsub("([%%~\r\n])", function(char)
+        return string.format("%%%02X", string.byte(char))
+    end))
+end
+NS.CB_UrlEncode = CB_UrlEncode
+
 -- Returns the clean API item link for a raw item link (which may carry color
 -- codes and extra enchant/gem fields that confuse the server-side parser).
 -- Strips to the item ID and re-fetches a canonical link from the client cache via
@@ -491,7 +502,7 @@ local function CB_SendBotCommandRaw(botName, command)
         local opcode = CB_GetBridgeOpcode(command)
         if opcode then
             local token = CB_NextToken("cmd")
-            CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. botName .. "~" .. token .. "~" .. command)
+            CB_SendBridge("RUN~" .. opcode .. "~BOT~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. CB_UrlEncode(command))
             return
         end
     end
@@ -729,7 +740,7 @@ NS.CB_RequestSpellbook = function(key, botName, force)
     local token = CB_NextToken("sb")
     entry.spellbookToken = token
 
-    CB_SendBridge(string.format("GET~SPELLBOOK~%s~%s", bName, token))
+    CB_SendBridge(string.format("GET~SPELLBOOK~%s~%s", CB_UrlEncode(bName), token))
     if NS.CB_RenderSpellbook then NS.CB_RenderSpellbook(key) end
 end
 
@@ -765,7 +776,7 @@ NS.CB_FetchSpecList = function(key, entry)
             staging = {},
             expires = GetTime() + (NS.QUERY_TIMEOUT or 10.0),
         }
-        CB_SendBridge(string.format("GET~TALENT_SPEC_LIST~%s~%s", bName, token))
+        CB_SendBridge(string.format("GET~TALENT_SPEC_LIST~%s~%s", CB_UrlEncode(bName), token))
         return
     end
 
@@ -1177,7 +1188,7 @@ NS.CB_FetchProfessions = function(key, botName, force)
     local bName = (entry and entry.name) or botName or key
     entry.awaitingProfessions = true
     entry.professionsTimeout  = 0
-    CB_SendBridge(string.format("GET~PROFESSION~%s", bName))
+    CB_SendBridge(string.format("GET~PROFESSION~%s", CB_UrlEncode(bName)))
 end
 
 NS.CB_FetchProfessionRecipes = function(key, botName, skillId, force)
@@ -1207,7 +1218,7 @@ NS.CB_FetchProfessionRecipes = function(key, botName, skillId, force)
         expires   = now + (NS.QUERY_TIMEOUT or 10.0),
         staging   = {},
     }
-    CB_SendBridge(string.format("GET~PROFESSION_RECIPES~%s~%d~%s", bName, sId, token))
+    CB_SendBridge(string.format("GET~PROFESSION_RECIPES~%s~%d~%s", CB_UrlEncode(bName), sId, token))
 end
 
 
@@ -1245,7 +1256,7 @@ NS.CB_BridgeCraftRecipe = function(key, botName, skillId, spellId, itemId, callb
         sentAt   = GetTime(),
     }
 
-    CB_SendBridge(string.format("RUN~CRAFT_RECIPE~%s~%s~%d~%d~%d", bName, token, sId, spId, itId))
+    CB_SendBridge(string.format("RUN~CRAFT_RECIPE~%s~%s~%d~%d~%d", CB_UrlEncode(bName), token, sId, spId, itId))
     return true
 end
 
@@ -1289,7 +1300,7 @@ NS.CB_BridgeCraftRecipeTarget = function(key, botName, skillId, spellId, targetB
         sentAt       = GetTime(),
     }
 
-    CB_SendBridge(string.format("RUN~CRAFT_RECIPE_TARGET~%s~%s~%d~%d~%d~%d~%d", token, bName, sId, spId, tBag, tSlot, tItemId))
+    CB_SendBridge(string.format("RUN~CRAFT_RECIPE_TARGET~%s~%s~%d~%d~%d~%d~%d", token, CB_UrlEncode(bName), sId, spId, tBag, tSlot, tItemId))
     return true
 end
 
@@ -1330,7 +1341,7 @@ NS.CB_FetchInventory = function(key, botName, manual)
                 NS.CB_FetchStats(entry, true)
             end
             local token = CB_NextToken("exinv")
-            CB_SendBridge("GET~INVENTORY_EXACT~" .. botName .. "~" .. token)
+            CB_SendBridge("GET~INVENTORY_EXACT~" .. CB_UrlEncode(botName) .. "~" .. token)
             return
         end
 
@@ -1377,7 +1388,7 @@ NS.CB_FetchStats = function(entry, force)
     entry.moneyTimeout  = 0
 
     if CB_EffectiveBridgeState() == "present" then
-        CB_SendBridge("GET~STATS~" .. entry.name)
+        CB_SendBridge("GET~STATS~" .. CB_UrlEncode(entry.name))
         return
     end
 
@@ -1414,7 +1425,7 @@ end
 NS.CB_BridgeSetGroupFormation = function(lowerForm)
     if not lowerForm or not BRIDGE_FORMATIONS[lowerForm] then return end
     local token = CB_NextToken("setform")
-    CB_SendBridge("RUN~FORMATION~GROUP~~" .. token .. "~" .. lowerForm)
+    CB_SendBridge("RUN~FORMATION~GROUP~~" .. token .. "~" .. CB_UrlEncode(lowerForm))
 
     -- Optimistic cache for all known group members
     for _, e in pairs(CleanBot_PartyBots) do
@@ -1506,7 +1517,7 @@ NS.CB_FetchBank = function(key, botName, manual)
                 expires = GetTime() + 2.5,
                 failed = false,
             }
-            CB_SendBridge("GET~BANK~" .. botName .. "~" .. token)
+            CB_SendBridge("GET~BANK~" .. CB_UrlEncode(botName) .. "~" .. token)
         else
             -- bankStaging is the whisper-path marker the silence tick keys off to finalize.
             -- Raw send: this already runs from the queue.
@@ -1586,7 +1597,7 @@ NS.CB_BridgeBulkSell = function(key, botName)
     if CB_EffectiveBridgeState() == "present" then
         local token = CB_NextToken("bsell")
         NS.bulkSellPending[token] = GetTime()
-        CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~SELL_GREY~0~0")
+        CB_SendBridge("RUN~ITEM_ACTION~" .. CB_UrlEncode(botName) .. "~" .. token .. "~SELL_GREY~0~0")
     else
         NS.CB_SendBotCommand(botName, "s gray")
         NS.CB_ScheduleReconcile(key, botName)
@@ -1603,7 +1614,7 @@ NS.CB_BridgeGroupBulkSell = function()
         local function addBot(key, name)
             pending.expected[key] = true
             local token = CB_NextToken("gbsell")
-            CB_SendBridge("RUN~ITEM_ACTION~" .. name .. "~" .. token .. "~SELL_GREY~0~0")
+            CB_SendBridge("RUN~ITEM_ACTION~" .. CB_UrlEncode(name) .. "~" .. token .. "~SELL_GREY~0~0")
         end
         if NS.CB_ForEachGroupMember then
             NS.CB_ForEachGroupMember(function(_, name)
@@ -1649,7 +1660,7 @@ NS.CB_BridgeEquipItem = function(key, botName, link, cell)
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
             local token = CB_NextToken("equip")
-            CB_SendBridge("RUN~ITEM_EQUIP~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            CB_SendBridge("RUN~ITEM_EQUIP~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_After(1.5, function()
                 NS.CB_FetchInventory(key, botName)
                 if key == NS.selectedBotKey and NS.tabList and NS.CB_QueueEquipRefresh then
@@ -1696,7 +1707,7 @@ NS.CB_FetchNearbyObjects = function(botName, callback)
     local token = CB_NextToken("objects")
     local request = { name = strlower(botName), objects = {}, callback = callback }
     pendingGameObjects[token] = request
-    CB_SendBridge("GET~GAMEOBJECTS~" .. botName .. "~" .. token)
+    CB_SendBridge("GET~GAMEOBJECTS~" .. CB_UrlEncode(botName) .. "~" .. token)
     NS.CB_After(5, function()
         if pendingGameObjects[token] ~= request then return end
         pendingGameObjects[token] = nil
@@ -1717,7 +1728,7 @@ NS.CB_BridgeUseItem = function(key, botName, link, cell)
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
             local token = CB_NextToken("use")
-            CB_SendBridge("RUN~ITEM_USE~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            CB_SendBridge("RUN~ITEM_USE~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
         end
@@ -1742,7 +1753,7 @@ NS.CB_BridgeDestroyItem = function(key, botName, link, cell)
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
             local token = CB_NextToken("destroy")
-            CB_SendBridge("RUN~ITEM_DESTROY~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            CB_SendBridge("RUN~ITEM_DESTROY~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
         end
@@ -1767,7 +1778,7 @@ NS.CB_BridgeSellItem = function(key, botName, link, cell)
             local itemId = cell.itemId or tonumber(strmatch(link or "", "item:(%d+)")) or 0
             local count = cell.count or 1
             local token = CB_NextToken("sell")
-            CB_SendBridge("RUN~ITEM_SELL~" .. botName .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+            CB_SendBridge("RUN~ITEM_SELL~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
             NS.CB_ScheduleReconcile(key, botName)
             return true
         end
@@ -1794,7 +1805,7 @@ NS.CB_BridgeDepositItem = function(botName, action, cell)
     local count = cell.count or 1
 
     local token = CB_NextToken("dep")
-    CB_SendBridge("RUN~ITEM_DEPOSIT_EXACT~" .. botName .. "~" .. token .. "~" .. action .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
+    CB_SendBridge("RUN~ITEM_DEPOSIT_EXACT~" .. CB_UrlEncode(botName) .. "~" .. token .. "~" .. action .. "~" .. tostring(cell.bag) .. "~" .. tostring(cell.slot) .. "~" .. tostring(itemId) .. "~" .. tostring(count))
     return true
 end
 
@@ -1814,7 +1825,7 @@ NS.CB_BridgeWithdrawItem = function(key, botName, link, count)
 
     local token = CB_NextToken("wdraw")
     NS.withdrawPending[token] = { key = key, botName = botName, sentAt = GetTime() }
-    CB_SendBridge("RUN~ITEM_ACTION~" .. botName .. "~" .. token .. "~BANK_WITHDRAW~" .. tostring(itemId) .. "~" .. tostring(count or 1))
+    CB_SendBridge("RUN~ITEM_ACTION~" .. CB_UrlEncode(botName) .. "~" .. token .. "~BANK_WITHDRAW~" .. tostring(itemId) .. "~" .. tostring(count or 1))
     NS.CB_ScheduleReconcile(key, botName)
     return true
 end
@@ -1831,7 +1842,7 @@ NS.CB_BridgeAbandonQuest = function(botName, questId, callback)
     local token = CB_NextToken("qdrop")
     local request = { botName = botName, questId = questId, callback = callback }
     pendingQuestAbandons[token] = request
-    CB_SendBridge(string.format("RUN~QUEST_ABANDON_TARGET~%s~%s~%d", token, botName, questId))
+    CB_SendBridge(string.format("RUN~QUEST_ABANDON_TARGET~%s~%s~%d", token, CB_UrlEncode(botName), questId))
     NS.CB_After(NS.QUERY_TIMEOUT or 10, function()
         if pendingQuestAbandons[token] ~= request then return end
         pendingQuestAbandons[token] = nil
@@ -1854,7 +1865,7 @@ NS.CB_FetchQuests = function(key, botName)
     if not entry then return end
 
     if CB_EffectiveBridgeState() == "present" then
-        CB_SendBridge("GET~QUESTS~ALL~" .. botName .. "~quests")
+        CB_SendBridge("GET~QUESTS~ALL~" .. CB_UrlEncode(botName) .. "~quests")
     else
         -- Whisper path: enqueue so the multi-line "quests all" reply is serialized; the typed
         -- flags are set at SEND time (the queued function) so the silence timer starts then.

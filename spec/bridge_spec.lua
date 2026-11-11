@@ -2686,5 +2686,24 @@ describe("DETAIL packet parsing", function()
         assert.equals("WARRIOR", CleanBot_PartyBots.bot.class)
     end)
 
+    describe("CB_UrlEncode", function()
+        it("leaves normal strings unchanged", function()
+            assert.equals("Rio", NS.CB_UrlEncode("Rio"))
+            assert.equals("+aoe,-focus", NS.CB_UrlEncode("+aoe,-focus"))
+        end)
+
+        it("escapes %, ~, and newlines", function()
+            assert.equals("a%7Eb", NS.CB_UrlEncode("a~b"))
+            assert.equals("100%25", NS.CB_UrlEncode("100%"))
+            assert.equals("line%0Anext", NS.CB_UrlEncode("line\nnext"))
+            assert.equals("cr%0Dnext", NS.CB_UrlEncode("cr\rnext"))
+        end)
+
+        it("handles nil and numbers gracefully", function()
+            assert.equals("", NS.CB_UrlEncode(nil))
+            assert.equals("123", NS.CB_UrlEncode(123))
+        end)
+    end)
+
     _G.gsub = originalGsub
 end)
