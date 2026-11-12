@@ -260,12 +260,23 @@ end
 ---@param cmd       string   Bot command prefix ("co" or "nc").
 ---@param getSource fun(entry:table?):table?  Extracts the state table from an entry.
 local function CB_ToggleStrategy(slot, s, checked, cmd, getSource)
-    for _, m in ipairs(CB_SlotTargets(slot)) do
-        if NS.CB_StrategyShown(s, m.class) then
-            local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, m.class)
-            local ds = getSource(CleanBot_PartyBots[m.key])
-            if ds then ds[s.field] = checked end
-            NS.CB_SendStrategyToggle(m, cmd, toggle, { [s.field] = checked })
+    if slot.isAll and not s.cmdByClass then
+        local toggle = (checked and "+" or "-") .. s.cmd
+        for _, m in ipairs(slot.members) do
+            if NS.CB_StrategyShown(s, m.class) then
+                local ds = getSource(CleanBot_PartyBots[m.key])
+                if ds then ds[s.field] = checked end
+            end
+        end
+        NS.CB_SendStrategyToggle(slot, cmd, toggle, { [s.field] = checked })
+    else
+        for _, m in ipairs(CB_SlotTargets(slot)) do
+            if NS.CB_StrategyShown(s, m.class) then
+                local toggle = (checked and "+" or "-") .. NS.CB_EffStrategyCmd(s, m.class)
+                local ds = getSource(CleanBot_PartyBots[m.key])
+                if ds then ds[s.field] = checked end
+                NS.CB_SendStrategyToggle(m, cmd, toggle, { [s.field] = checked })
+            end
         end
     end
     if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
@@ -277,10 +288,18 @@ end
 ---@param strat table   The timerSlider strategy definition.
 ---@param v     number  The new timer value.
 local function CB_SendTimerValue(slot, strat, v)
-    for _, m in ipairs(CB_SlotTargets(slot)) do
-        NS.CB_SendBotCommand(m.name, strat.cmd .. " " .. v)
-        local e = CleanBot_PartyBots[m.key]
-        if e and e.combat then e.combat[strat.field] = v end
+    if slot.isAll and NS.CB_SendGroupCommand then
+        for _, m in ipairs(slot.members) do
+            local e = CleanBot_PartyBots[m.key]
+            if e and e.combat then e.combat[strat.field] = v end
+        end
+        NS.CB_SendGroupCommand(strat.cmd .. " " .. v)
+    else
+        for _, m in ipairs(CB_SlotTargets(slot)) do
+            NS.CB_SendBotCommand(m.name, strat.cmd .. " " .. v)
+            local e = CleanBot_PartyBots[m.key]
+            if e and e.combat then e.combat[strat.field] = v end
+        end
     end
     if slot.isGroup and NS.CB_OnGroupWrite then NS.CB_OnGroupWrite(slot) end
 end

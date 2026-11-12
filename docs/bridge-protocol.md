@@ -44,7 +44,7 @@ When the effective bridge state is not `present`, each click immediately sends
 `.playerbots bot self` through chat and the server's system message updates the checkbox.
 Clicks are not deferred during bridge detection. No SelfBot state is saved across sessions.
 
-Server-side, the allowlisted text-command families (`COMBAT`, `POSITION`, `LOOT`, `RTI`)
+Server-side, the allowlisted text-command families (`POSITION`, `LOOT`, `RTI`)
 use `ExecuteSilentBotCommand()`, which calls `botAI->HandleCommand` with
 `CHAT_MSG_WHISPER` and a silent-routing prefix. Other `RUN~` endpoints, including
 formation, inventory, and crafting, use their dedicated handlers.
@@ -96,16 +96,27 @@ Allowlists mirror the server's `IsAllowed*()` checks — keep `Bridge.lua` in sy
 
 | Opcode | Allowed commands | Notes |
 |---|---|---|
-| `COMBAT` | `co +/-` for: focus, dps assist, aoe, dps aoe, tank assist, avoid aoe, save mana, threat, behind, wait for attack — plus `wait for attack time <N>` (N = 0–60, no `co` prefix) | Matched case-insensitively (server bridge caps at 60s; direct Playerbots whisper allows 0–99) |
 | `POSITION` | `disperse disable`, `disperse set <N>` (0 < N ≤ 100) | Allowlisted plumbing — no CleanBot UI sends these yet |
 | `LOOT` | `nc +loot`, `nc -loot`, `ll all/normal/gray/disenchant` | Server allowlist (`IsAllowedLootCommand`); case-sensitive on the server. CleanBot's `Bridge.lua` routes all 4 `ll` options through the bridge |
 | `RTI` | `rti <icon>`, `rti cc <icon>` (STAR/CIRCLE/DIAMOND/TRIANGLE/MOON/SQUARE/CROSS/SKULL), `attack rti target`, `pull rti target` | Allowlisted plumbing — no CleanBot UI sends these yet |
 
-The legacy `RUN~COMBAT` handler normalizes `co +dps aoe` / `co -dps aoe` to
-`co +aoe` / `co -aoe`. These are different strategies in the Playerbots core: `dps aoe`
-selects a target, while `aoe` enables a class rotation. CleanBot's Targeting dropdown
-currently sends combined strategy changes, which do not match this single-command
-allowlist and therefore use chat.
+### Strategy mutations — direct `RUN~STRATEGY` opcode
+
+Strategy toggles are dispatched natively by `NS.CB_SendStrategyToggle`:
+
+`RUN~STRATEGY~<scope>~<target>~<token>~<stateScope>~<encodedChanges>`
+
+- `<scope>`: `GROUP` (target left empty `""`) for whole-group operations, or `BOT` for a single target.
+- `<target>`: URL-encoded bot name when `<scope>` is `BOT`; empty string when `<scope>` is `GROUP`.
+- `<token>`: Request correlation token (`<timestamp>-strat-<seq>`).
+- `<stateScope>`: `C` for combat strategies (`prefix == "co"`), or `N` for non-combat strategies (`prefix == "nc"`).
+- `<encodedChanges>`: URL-encoded strategy change string (e.g. `+focus`, `+food,+drink`, `-aoe`).
+
+The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded` and `failed` counts and initiates a debounced `GET~STATES` query (`CB_RequestStates`) if either count is greater than zero to reconcile client state.
+
+*Exceptions*:
+- `wait for attack` toggles and numerical timers (`wait for attack time <N>`) fall back to chat commands.
+- SelfBot strategy mutations route via chat whispers to support strategies beyond the server bridge allowlist.
 
 ### Inventory actions — direct `RUN~ITEM_*` opcodes
 
@@ -185,6 +196,7 @@ skip tokens they do not use.
 | `FORMATIONS_BEGIN~<token>~<count>` | — | Marks start of formations batch |
 | `FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>` | per-bot formation snapshot | Updates entry.formation for bot; clears awaitingFormation unconditionally |
 | `FORMATIONS_END~<token>~<sentCount>` | — | Clears formationsPending and refreshes UI controls |
+| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded and failed counts; triggers debounced `CB_RequestStates()` when succeeded > 0 or failed > 0 for UI reconciliation |
 | `FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>` | formation change acknowledgement | Updates group members' formation if succeeded > 0; triggers re-fetch on failure |
 | `TALENT_SPEC_BEGIN~<encodedBotName>~<token>` | — | Resets talent specs staging buffer |
 | `TALENT_SPEC_CURRENT~<encodedBotName>~<token>~<activeSpec>~<tab1>~<tab2>~<tab3>` | `<activeSpec>` (1-based index) + 3 tab point counts | Available on server; not currently handled by CleanBot |

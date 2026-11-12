@@ -683,6 +683,8 @@ local function CB_ApplyMemberSelection()
     end
 
     NS.groupSlot.members = managed
+    local isAllGroup = selectedGroupValues and #selectedGroupValues == 1 and selectedGroupValues[1] == "all:all"
+    NS.groupSlot.isAll = isAllGroup and (#managed == #currentMembers and #managed > 0) or false
 
     -- Per-class slots filtered to the managed subset (absent classes cleared so a
     -- stale tab never sends to old members).

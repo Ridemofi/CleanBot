@@ -149,25 +149,85 @@ describe("Bridge command routing", function()
         Mock.party             = 1   -- so CB_SendBridge picks the PARTY channel
     end)
 
-    it("routes an allowlisted combat toggle through the bridge with valid token (no whisper)", function()
-        NS.CB_SendBotCommand("Bot", "co +focus")
+    it("dispatches RUN~STRATEGY for combat toggles when bridge is present", function()
+        local slot = { name = "Bot", key = "bot" }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
         assert.equals(1, #Mock.addon)
         assert.equals(0, #Mock.whispers)
-        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~co %+focus$"))
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~STRATEGY~BOT~Bot~%d+%-strat%-%d+~C~%+focus$"))
         assert.equals("PARTY", Mock.addon[1].channel)
     end)
 
-    it("routes wait for attack and wait for attack time through bridge with valid token", function()
-        NS.CB_SendBotCommand("Bot", "co +wait for attack")
-        assert.equals(1, #Mock.addon)
-        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~co %+wait for attack$"))
-
-        Mock.reset()
-        Mock.party = 1
-        NS.CB_SendBotCommand("Bot", "wait for attack time 5")
+    it("dispatches RUN~STRATEGY for non-combat toggles with encoded bot name and changes", function()
+        local slot = { name = "Bot~Special", key = "bot~special" }
+        NS.CB_SendStrategyToggle(slot, "nc", "+food~drink")
         assert.equals(1, #Mock.addon)
         assert.equals(0, #Mock.whispers)
-        assert.is_not_nil(Mock.addon[1].text:match("^RUN~COMBAT~BOT~Bot~%d+%-cmd%-%d+~wait for attack time 5$"))
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~STRATEGY~BOT~Bot%%7ESpecial~%d+%-strat%-%d+~N~%+food%%7Edrink$"))
+    end)
+
+    it("dispatches single RUN~STRATEGY with GROUP scope when slot.isAll is true and bridge is present", function()
+        local slot = { isGroup = true, isAll = true }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
+        assert.equals(1, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~STRATEGY~GROUP~~%d+%-strat%-%d+~C~%+focus$"))
+        assert.equals("PARTY", Mock.addon[1].channel)
+    end)
+
+    it("routes SelfBot strategy toggles via chat when selfBotActive is true", function()
+        NS.selfBotActive = true
+        local slot = { name = "TestPlayer", key = "testplayer" }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("co +focus,?", Mock.whispers[1].text)
+        assert.equals("TestPlayer", Mock.whispers[1].target)
+        NS.selfBotActive = false
+    end)
+
+    it("dispatches RUN~STRATEGY GROUP and whispers SelfBot when slot.isAll and selfBotActive is true", function()
+        NS.selfBotActive = true
+        local slot = { isGroup = true, isAll = true }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
+        assert.equals(1, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~STRATEGY~GROUP~~%d+%-strat%-%d+~C~%+focus$"))
+        assert.equals("co +focus", Mock.whispers[1].text)
+        assert.equals("TestPlayer", Mock.whispers[1].target)
+        NS.selfBotActive = false
+    end)
+
+    it("sends single group chat command when slot.isAll is true and bridge is absent", function()
+        if not NS.CB_SendGroupCommand then dofile("CommandControls.lua") end
+        NS.debugBridgeOverride = "absent"
+        local slot = { isGroup = true, isAll = true }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
+        assert.equals(0, #Mock.addon)
+        assert.equals(0, #Mock.whispers)
+        assert.equals(1, #Mock.chat)
+        assert.equals("co +focus", Mock.chat[1].text)
+        assert.equals("PARTY", Mock.chat[1].channel)
+    end)
+
+    it("triggers CB_RequestStates on confirmed or failed STRATEGY_ACK", function()
+        local requested = 0
+        local oldReq = NS.CB_RequestStates
+        NS.CB_RequestStates = function() requested = requested + 1 end
+
+        -- Succeeded count > 0 (8-field native format from MultiBotBridge.cpp: scope~target~token~stateScope~matched~succeeded~failed~reason)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-1~C~1~1~0~OK")
+        assert.equals(1, requested)
+
+        -- Failure count > 0 triggers CB_RequestStates for UI reconciliation
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-2~C~1~0~1~RATE_LIMIT")
+        assert.equals(2, requested)
+
+        -- Zero succeeded and zero failed should not trigger
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-3~C~0~0~0~NO_MATCH")
+        assert.equals(2, requested)
+
+        NS.CB_RequestStates = oldReq
     end)
 
     it("whispers a query (co ?) instead of bridging it", function()
@@ -175,6 +235,23 @@ describe("Bridge command routing", function()
         assert.equals(0, #Mock.addon)
         assert.equals(1, #Mock.whispers)
         assert.equals("co ?", Mock.whispers[1].text)
+        assert.equals("Bot", Mock.whispers[1].target)
+    end)
+
+    it("routes wait for attack via chat fallback even when bridge is present", function()
+        local slot = { name = "Bot", key = "bot" }
+        NS.CB_SendStrategyToggle(slot, "co", "+wait for attack")
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("co +wait for attack,?", Mock.whispers[1].text)
+        assert.equals("Bot", Mock.whispers[1].target)
+    end)
+
+    it("whispers 'wait for attack time N' rather than bridging it", function()
+        NS.CB_SendBotCommand("Bot", "wait for attack time 5")
+        assert.equals(0, #Mock.addon)
+        assert.equals(1, #Mock.whispers)
+        assert.equals("wait for attack time 5", Mock.whispers[1].text)
         assert.equals("Bot", Mock.whispers[1].target)
     end)
 
@@ -197,10 +274,10 @@ describe("Bridge override gating", function()
 
     it("forces a whisper when the override is 'absent', even for an allowlisted command", function()
         NS.debugBridgeOverride = "absent"
-        NS.CB_SendBotCommand("Bot", "co +focus")
+        NS.CB_SendBotCommand("Bot", "nc +loot")
         assert.equals(0, #Mock.addon)
         assert.equals(1, #Mock.whispers)
-        assert.equals("co +focus", Mock.whispers[1].text)
+        assert.equals("nc +loot", Mock.whispers[1].text)
     end)
 end)
 

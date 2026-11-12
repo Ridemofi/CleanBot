@@ -279,31 +279,6 @@ end
 -- Keep in sync with the server when the bridge is updated.
 -- ============================================================
 
--- RUN~COMBAT — IsAllowedCombatCommand()
-local BRIDGE_COMBAT_CMDS = {
-    ["CO +FOCUS"]           = true,
-    ["CO -FOCUS"]           = true,
-    ["CO +DPS ASSIST"]      = true,
-    ["CO -DPS ASSIST"]      = true,
-    ["CO +AOE"]             = true,
-    ["CO -AOE"]             = true,
-    ["CO +DPS AOE"]         = true,
-    ["CO -DPS AOE"]         = true,
-    ["CO +TANK ASSIST"]     = true,
-    ["CO -TANK ASSIST"]     = true,
-    ["CO +AVOID AOE"]       = true,
-    ["CO -AVOID AOE"]       = true,
-    ["CO +SAVE MANA"]       = true,
-    ["CO -SAVE MANA"]       = true,
-    ["CO +THREAT"]          = true,
-    ["CO -THREAT"]          = true,
-    ["CO +BEHIND"]          = true,
-    ["CO -BEHIND"]          = true,
-    ["CO +WAIT FOR ATTACK"] = true,
-    ["CO -WAIT FOR ATTACK"] = true,
-    -- "wait for attack time N" (N = 0–60) handled via pattern below
-}
-
 -- RUN~LOOT — IsAllowedLootCommand()  (case-sensitive after trim)
 local BRIDGE_LOOT_CMDS = {
     ["nc +loot"] = true,
@@ -341,15 +316,8 @@ local BRIDGE_FORMATIONS = {
 NS.BRIDGE_FORMATIONS = BRIDGE_FORMATIONS
 
 ---@param command string  The bot command being routed.
----@return string|nil      The bridge opcode ("COMBAT"/"POSITION"/"LOOT"/"RTI") or nil to whisper.
+---@return string|nil      The bridge opcode ("POSITION"/"LOOT"/"RTI") or nil to whisper.
 local function CB_GetBridgeOpcode(command)
-    -- COMBAT: static set
-    if BRIDGE_COMBAT_CMDS[strupper(command)] then return "COMBAT" end
-
-    -- COMBAT: "wait for attack time N" — no "co" prefix, N must be 0–60
-    local n = strmatch(command, "^[Ww][Aa][Ii][Tt]%s+[Ff][Oo][Rr]%s+[Aa][Tt][Tt][Aa][Cc][Kk]%s+[Tt][Ii][Mm][Ee]%s+(%d+)$")
-    if n and tonumber(n) <= 60 then return "COMBAT" end
-
     -- POSITION: "disperse disable" or "disperse set N" (0 < N ≤ 100)
     local lower = strlower(command)
     if lower == "disperse disable" then return "POSITION" end
@@ -634,7 +602,8 @@ end
 ---@param toggleStr string  Toggle body, e.g. "+focus", "-aoe", "+arms,-fury,-prot".
 ---@param expectMap table?  field→expected-bool map for the debug mismatch check.
 NS.CB_SendStrategyToggle = function(slot, prefix, toggleStr, expectMap)
-    local entry = CleanBot_PartyBots[slot.key]
+    local isAll = slot and slot.isAll
+    local entry = not isAll and CleanBot_PartyBots[slot.key] or nil
 
     if entry and NS.debugVerify and expectMap then
         local section = (prefix == "co") and "combat" or "nonCombat"
@@ -644,17 +613,35 @@ NS.CB_SendStrategyToggle = function(slot, prefix, toggleStr, expectMap)
         entry.stratExpect[section] = acc
     end
 
-    if CB_EffectiveBridgeState() == "present" then
-        NS.CB_SendBotCommand(slot.name, prefix .. " " .. toggleStr)
-        NS.CB_RequestStates()
+    -- Route 'wait for attack' via chat fallback until dedicated bridge numerical parameter handling is integrated.
+    local isWaitForAttack = strfind(toggleStr, "wait for attack", 1, true) ~= nil
+    -- SelfBot strategy changes route via chat whispers to support strategies beyond the server bridge allowlist.
+    local selfName = UnitName("player")
+    local isSelf = not isAll and NS.selfBotActive and slot.name and (strlower(slot.name) == strlower(selfName))
+
+    if CB_EffectiveBridgeState() == "present" and not isWaitForAttack and not isSelf then
+        local token = CB_NextToken("strat")
+        local stateScope = (prefix == "co") and "C" or "N"
+        local scope = isAll and "GROUP" or "BOT"
+        local target = isAll and "" or CB_UrlEncode(slot.name)
+        CB_SendBridge("RUN~STRATEGY~" .. scope .. "~" .. target .. "~" .. token .. "~" .. stateScope .. "~" .. CB_UrlEncode(toggleStr))
+        if isAll and NS.selfBotActive then
+            NS.CB_SendBotCommand(selfName, prefix .. " " .. toggleStr)
+        end
     else
-        NS.CB_SendBotCommand(slot.name, prefix .. " " .. toggleStr .. ",?")
-        if entry then
-            if prefix == "co" then
-                entry.awaitingCo   = true
-                entry.coVerifyOnly = true   -- parse the combat reply but don't chain "nc ?"
-            else
-                entry.awaitingNc = true
+        if isAll then
+            if NS.CB_SendGroupCommand then
+                NS.CB_SendGroupCommand(prefix .. " " .. toggleStr)
+            end
+        else
+            NS.CB_SendBotCommand(slot.name, prefix .. " " .. toggleStr .. ",?")
+            if entry then
+                if prefix == "co" then
+                    entry.awaitingCo   = true
+                    entry.coVerifyOnly = true   -- parse the combat reply but don't chain "nc ?"
+                else
+                    entry.awaitingNc = true
+                end
             end
         end
     end
@@ -2729,6 +2716,22 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             NS.formationsTimeout = 0
             NS.formationsToken   = nil
             if NS.CB_RefreshCommands then NS.CB_RefreshCommands() end
+
+        elseif msg and strsub(msg, 1, 13) == "STRATEGY_ACK~" then
+            -- STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>
+            local rest = strsub(msg, 14)
+            local scope, r2 = NS.CB_SplitOnce(rest, "~")
+            local target, r3 = NS.CB_SplitOnce(r2, "~")
+            local token, r4 = NS.CB_SplitOnce(r3, "~")
+            local stateScope, r5 = NS.CB_SplitOnce(r4, "~")
+            local matched, r6 = NS.CB_SplitOnce(r5, "~")
+            local succeeded, r7 = NS.CB_SplitOnce(r6, "~")
+            local failed, reason = NS.CB_SplitOnce(r7, "~")
+            local succCount = tonumber(succeeded) or 0
+            local failCount = tonumber(failed) or 0
+            if succCount > 0 or failCount > 0 then
+                NS.CB_RequestStates()
+            end
 
         elseif msg and strsub(msg, 1, 14) == "FORMATION_ACK~" then
             -- FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>
