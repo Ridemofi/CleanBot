@@ -362,7 +362,12 @@ end
 --- Selects the top-level tab at `index`, showing its panel and deactivating the rest.
 ---@param index number  1-based index of the tab to activate.
 NS.CleanBot_SelectTopTab = function(index)
-    if NS.activeTopTabIndex == index then return end
+    if NS.activeTopTabIndex == index then
+        if index == 3 then
+            NS.CB_RequestStates()
+        end
+        return
+    end
     NS.activeTopTabIndex = index
 
     for i, tab in ipairs(NS.topTabs) do
@@ -391,6 +396,10 @@ NS.CleanBot_SelectTopTab = function(index)
         for _, info in ipairs(NS.tabList or {}) do
             if info.model then info.model:Hide() end
         end
+    end
+
+    if index == 3 then
+        NS.CB_RequestStates()
     end
 end
 

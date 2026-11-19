@@ -749,8 +749,8 @@ end
 -- Applies the group list's current selection: resolves the union of the selected
 -- groups' members, sets the member list, picks the managed selection (all by
 -- default; preserved across an internal refresh of the SAME group set so a state
--- packet can't reset a narrowed selection), then applies it. User selections
--- request a silent bridge-path state re-read; server refreshes use cached data.
+-- packet can't reset a narrowed selection), then applies it. Both user selections
+-- and server refreshes use cached data in memory without network calls.
 -- (The whisper path deliberately relies on the
 -- per-toggle ",?" self-heal instead of mass co?/nc? probes per selection.)
 ---@param fromUserClick boolean?  True on a group-list click (→ reselect all members).
@@ -771,7 +771,6 @@ local function CB_ApplyGroupSelection(fromUserClick)
 
     lastAppliedSignature = signature
     CB_ApplyMemberSelection()
-    if fromUserClick and #selectedGroupValues > 0 then NS.CB_RequestStates() end
 end
 
 -- Rebuilds only the left group list (items + re-highlight) without touching the

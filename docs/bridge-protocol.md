@@ -112,7 +112,7 @@ Strategy toggles are dispatched natively by `NS.CB_SendStrategyToggle`:
 - `<stateScope>`: `C` for combat strategies (`prefix == "co"`), or `N` for non-combat strategies (`prefix == "nc"`).
 - `<encodedChanges>`: URL-encoded strategy change string (e.g. `+focus`, `+food,+drink`, `-aoe`).
 
-The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded` and `failed` counts and initiates a debounced `GET~STATES` query (`CB_RequestStates`) if either count is greater than zero to reconcile client state.
+The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded` and `failed` counts and initiates a `GET~STATES` query (`CB_RequestStates`) if either count is greater than zero to reconcile client state.
 
 *Exceptions*:
 - `wait for attack` toggles and numerical timers (`wait for attack time <N>`) fall back to chat commands.
@@ -160,8 +160,8 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~GAMEOBJECTS~<botName>~<token>` | Nearby interactive game objects (doors, chests, nodes) | `GAMEOBJECTS_BEGIN~` / `GAMEOBJECTS_ITEM~` / `GAMEOBJECTS_END~` / `GAMEOBJECTS_DONE~` |
 | `GET~SELF_STRATEGY_STATE~<token>` | Combat and non-combat strategies for SelfBot | `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` |
 
-`GET~ROSTER/DETAILS/STATES` are debounced: `CB_RequestSync` (0.5 s, all three) and
-`CB_RequestStates` (0.4 s, states only — silent strategy reconciliation after a toggle).
+`GET~ROSTER/DETAILS/STATES`: `CB_RequestSync` (debounced 0.5 s, all three) and
+`CB_RequestStates` (states only — silent strategy reconciliation after a toggle, or upon opening/refreshing the Group tab).
 
 ---
 
@@ -196,7 +196,7 @@ skip tokens they do not use.
 | `FORMATIONS_BEGIN~<token>~<count>` | — | Marks start of formations batch |
 | `FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>` | per-bot formation snapshot | Updates entry.formation for bot; clears awaitingFormation unconditionally |
 | `FORMATIONS_END~<token>~<sentCount>` | — | Clears formationsPending and refreshes UI controls |
-| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded and failed counts; triggers debounced `CB_RequestStates()` when succeeded > 0 or failed > 0 for UI reconciliation |
+| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded and failed counts; triggers `CB_RequestStates()` when succeeded > 0 or failed > 0 for UI reconciliation |
 | `FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>` | formation change acknowledgement | Updates group members' formation if succeeded > 0; triggers re-fetch on failure |
 | `TALENT_SPEC_BEGIN~<encodedBotName>~<token>` | — | Resets talent specs staging buffer |
 | `TALENT_SPEC_CURRENT~<encodedBotName>~<token>~<activeSpec>~<tab1>~<tab2>~<tab3>` | `<activeSpec>` (1-based index) + 3 tab point counts | Available on server; not currently handled by CleanBot |
