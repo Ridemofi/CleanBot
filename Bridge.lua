@@ -551,21 +551,26 @@ NS.CB_RequestRosterThenRefresh = function()
     NS.CB_RequestSync()
 end
 
--- Lightweight, debounced strategy-state re-sync (bridge path). Unlike
+-- Lightweight strategy-state re-sync (bridge path). Unlike
 -- CB_RequestSync it sends ONLY GET~STATES (framed when capable) — no ROSTER/DETAILS
 -- and no RefreshTabs — so it reconciles strategy flags without tab/inspect churn.
--- Used to verify a strategy toggle silently after sending it over the bridge.
-NS.statesPending = false
+-- Used to verify whole-group strategy toggles or refresh upon opening the Group tab.
 NS.CB_RequestStates = function()
-    if NS.statesPending then return end
-    NS.statesPending = true
-    NS.CB_After(0.4, function()
-        NS.statesPending = false
-        if CB_EffectiveBridgeState() == "present" then
-            local token = CB_BeginStateRequest(true)
-            CB_SendBridge("GET~STATES~" .. token)
-        end
-    end)
+    if CB_EffectiveBridgeState() == "present" then
+        local token = CB_BeginStateRequest(true)
+        CB_SendBridge("GET~STATES~" .. token)
+    end
+end
+
+-- Single-bot strategy-state re-sync (bridge path). Sends GET~STATE~<botName>~<token>
+-- to query only the specified bot's strategy flags without requesting the entire group.
+---@param botName string  The bot's character name.
+NS.CB_RequestState = function(botName)
+    if not botName then return end
+    if CB_EffectiveBridgeState() == "present" then
+        local token = CB_BeginStateRequest(false, botName)
+        CB_SendBridge("GET~STATE~" .. CB_UrlEncode(botName) .. "~" .. token)
+    end
 end
 
 -- Authoritative per-bot re-read of strategies + formation + loot — used to VERIFY/reconcile after a
@@ -591,7 +596,7 @@ end
 -- re-read so the optimistic UI converges to the bot's real state (self-healing).
 -- Path-aware to avoid reintroducing bridge whisper spam:
 --   bridge present → send the toggle as usual (allowlisted singles stay silent),
---                    then a silent debounced GET~STATES (CB_RequestStates).
+--                    reconciled via STRATEGY_ACK (CB_RequestState for BOT, CB_RequestStates for GROUP).
 --   no bridge      → send the atomic combined form "<prefix> <toggle>,?" so the
 --                    bot's "Strategies:" reply (still via CHAT_MSG_WHISPER) reflects
 --                    the post-set state; arm awaitingCo/awaitingNc to consume it.
@@ -2443,6 +2448,8 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 local req = NS.stateRequests[token]
                 if req and req.global then
                     req.completedBots = (req.completedBots or 0) + 1
+                elseif req and not req.global then
+                    CB_ClearStateRequest(token)
                 end
             end
 
@@ -2729,8 +2736,12 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local failed, reason = NS.CB_SplitOnce(r7, "~")
             local succCount = tonumber(succeeded) or 0
             local failCount = tonumber(failed) or 0
-            if succCount > 0 or failCount > 0 then
-                NS.CB_RequestStates()
+            if succCount > 0 or failCount > 0 or reason ~= "OK" then
+                if scope == "BOT" then
+                    NS.CB_RequestState(CB_UrlDecode(target))
+                else
+                    NS.CB_RequestStates()
+                end
             end
 
         elseif msg and strsub(msg, 1, 14) == "FORMATION_ACK~" then

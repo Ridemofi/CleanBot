@@ -112,7 +112,7 @@ Strategy toggles are dispatched natively by `NS.CB_SendStrategyToggle`:
 - `<stateScope>`: `C` for combat strategies (`prefix == "co"`), or `N` for non-combat strategies (`prefix == "nc"`).
 - `<encodedChanges>`: URL-encoded strategy change string (e.g. `+focus`, `+food,+drink`, `-aoe`).
 
-The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded` and `failed` counts and initiates a `GET~STATES` query (`CB_RequestStates`) if either count is greater than zero to reconcile client state.
+The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded`, `failed`, and `reason`: if `succeeded > 0`, `failed > 0`, or `reason ~= "OK"`, it initiates a single-bot query via `CB_RequestState(target)` for `BOT` scope or a global `GET~STATES` query (`CB_RequestStates`) for `GROUP` scope to reconcile client state.
 
 *Exceptions*:
 - `wait for attack` toggles and numerical timers (`wait for attack time <N>`) fall back to chat commands.
@@ -146,6 +146,7 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~ROSTER` | Bot names in the group | `ROSTER~` |
 | `GET~DETAILS` | Per-bot identity/class | `DETAIL~` |
 | `GET~STATES~<token>` | Framed strategy snapshot (`STATE_FRAMING_V1` capable) | `STATES_BEGIN~` / `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATES_END~` / `STATE_ABORT~` |
+| `GET~STATE~<botName>~<token>` | Single-bot strategy snapshot | `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATE_ABORT~` |
 | `GET~STATES` | Per-bot strategy snapshot (legacy fallback) | `STATE~` |
 | `GET~INVENTORY~<botName>~inv` | Bot's bag contents + money | `INV_BEGIN~` / `INV_SUMMARY~` / `INV_ITEM~` / `INV_END~` |
 | `GET~INVENTORY_EXACT~<botName>~<token>` | Bot's bag contents with exact coordinates (`INVENTORY_EXACT_V1`) | `INV_EXACT_BEGIN~` / `INV_BAG~` / `INV_ITEM_LOC~` / `INV_EXACT_END~` |
@@ -160,8 +161,9 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 | `GET~GAMEOBJECTS~<botName>~<token>` | Nearby interactive game objects (doors, chests, nodes) | `GAMEOBJECTS_BEGIN~` / `GAMEOBJECTS_ITEM~` / `GAMEOBJECTS_END~` / `GAMEOBJECTS_DONE~` |
 | `GET~SELF_STRATEGY_STATE~<token>` | Combat and non-combat strategies for SelfBot | `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` |
 
-`GET~ROSTER/DETAILS/STATES`: `CB_RequestSync` (debounced 0.5 s, all three) and
-`CB_RequestStates` (states only — silent strategy reconciliation after a toggle, or upon opening/refreshing the Group tab).
+`GET~ROSTER/DETAILS/STATES`: `CB_RequestSync` (debounced 0.5 s, all three),
+`CB_RequestStates` (states only — silent whole-group strategy reconciliation, or upon opening/refreshing the Group tab),
+and `CB_RequestState` (`GET~STATE~<botName>~<token>` — single-bot silent strategy reconciliation after a toggle).
 
 ---
 
@@ -196,7 +198,7 @@ skip tokens they do not use.
 | `FORMATIONS_BEGIN~<token>~<count>` | — | Marks start of formations batch |
 | `FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>` | per-bot formation snapshot | Updates entry.formation for bot; clears awaitingFormation unconditionally |
 | `FORMATIONS_END~<token>~<sentCount>` | — | Clears formationsPending and refreshes UI controls |
-| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded and failed counts; triggers `CB_RequestStates()` when succeeded > 0 or failed > 0 for UI reconciliation |
+| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded, failed, and reason; triggers `CB_RequestState(target)` (`BOT` scope) or `CB_RequestStates()` (`GROUP` scope) when `succeeded > 0`, `failed > 0`, or `reason ~= "OK"` for UI reconciliation |
 | `FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>` | formation change acknowledgement | Updates group members' formation if succeeded > 0; triggers re-fetch on failure |
 | `TALENT_SPEC_BEGIN~<encodedBotName>~<token>` | — | Resets talent specs staging buffer |
 | `TALENT_SPEC_CURRENT~<encodedBotName>~<token>~<activeSpec>~<tab1>~<tab2>~<tab3>` | `<activeSpec>` (1-based index) + 3 tab point counts | Available on server; not currently handled by CleanBot |

@@ -210,24 +210,74 @@ describe("Bridge command routing", function()
         assert.equals("PARTY", Mock.chat[1].channel)
     end)
 
-    it("triggers CB_RequestStates on confirmed or failed STRATEGY_ACK", function()
-        local requested = 0
-        local oldReq = NS.CB_RequestStates
-        NS.CB_RequestStates = function() requested = requested + 1 end
+    it("triggers CB_RequestStates on GROUP ACK and CB_RequestState on BOT ACK", function()
+        local requestedGlobal = 0
+        local requestedSingle = {}
+        local oldReqGlobal = NS.CB_RequestStates
+        local oldReqSingle = NS.CB_RequestState
+        NS.CB_RequestStates = function() requestedGlobal = requestedGlobal + 1 end
+        NS.CB_RequestState  = function(name) requestedSingle[#requestedSingle + 1] = name end
 
-        -- Succeeded count > 0 (8-field native format from MultiBotBridge.cpp: scope~target~token~stateScope~matched~succeeded~failed~reason)
         Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-1~C~1~1~0~OK")
-        assert.equals(1, requested)
+        assert.equals(0, requestedGlobal)
+        assert.same({ "Bot" }, requestedSingle)
 
-        -- Failure count > 0 triggers CB_RequestStates for UI reconciliation
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-2~C~1~0~1~RATE_LIMIT")
-        assert.equals(2, requested)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-2~C~0~0~0~RATE_LIMIT")
+        assert.equals(0, requestedGlobal)
+        assert.same({ "Bot", "Bot" }, requestedSingle)
 
-        -- Zero succeeded and zero failed should not trigger
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-3~C~0~0~0~NO_MATCH")
-        assert.equals(2, requested)
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~GROUP~~123-strat-3~C~1~1~0~OK")
+        assert.equals(1, requestedGlobal)
 
-        NS.CB_RequestStates = oldReq
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~GROUP~~123-strat-4~C~0~0~0~RATE_LIMIT")
+        assert.equals(2, requestedGlobal)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~GROUP~~123-strat-5~C~0~0~0~OK")
+        assert.equals(2, requestedGlobal)
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-6~C~0~0~0~OK")
+        assert.equals(2, requestedGlobal)
+        assert.same({ "Bot", "Bot" }, requestedSingle)
+
+        NS.CB_RequestStates = oldReqGlobal
+        NS.CB_RequestState  = oldReqSingle
+    end)
+
+    it("dispatches BOT scope with target name when slot.isAll is not true", function()
+        NS.bridgeState = "present"
+        NS.debugBridgeOverride = nil
+        local members = {}
+        for i = 1, 7 do members[i] = { key = "bot" .. i, name = "Bot" .. i } end
+        local slot = { isGroup = true, isAll = false, name = "Bot1", key = "bot1", members = members }
+        NS.CB_SendStrategyToggle(slot, "co", "+focus")
+        assert.equals(1, #Mock.addon)
+        assert.is_not_nil(Mock.addon[1].text:match("^RUN~STRATEGY~BOT~Bot1~%S+~C~%+focus$"))
+    end)
+
+    it("clears single-bot state request on STATE_END", function()
+        NS.bridgeState = "present"
+        NS.CB_RequestState("Bot1")
+        local sentMsg = Mock.addon[#Mock.addon].text
+        local token = sentMsg:match("^GET~STATE~Bot1~(%S+)$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.stateRequests[token])
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_BEGIN~" .. token .. "~Bot1~1~0")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_ITEM~" .. token .. "~Bot1~C~+focus")
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_END~" .. token .. "~Bot1~1~0")
+        assert.is_nil(NS.stateRequests[token])
+    end)
+
+    it("clears single-bot state request on STATE_ABORT", function()
+        NS.bridgeState = "present"
+        NS.CB_RequestState("Bot1")
+        local sentMsg = Mock.addon[#Mock.addon].text
+        local token = sentMsg:match("^GET~STATE~Bot1~(%S+)$")
+        assert.is_not_nil(token)
+        assert.is_not_nil(NS.stateRequests[token])
+
+        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STATE_ABORT~" .. token .. "~Bot1~NO_BOT")
+        assert.is_nil(NS.stateRequests[token])
     end)
 
     it("whispers a query (co ?) instead of bridging it", function()
