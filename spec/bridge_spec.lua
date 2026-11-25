@@ -232,13 +232,6 @@ describe("Bridge command routing", function()
         Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~GROUP~~123-strat-4~C~0~0~0~RATE_LIMIT")
         assert.equals(2, requestedGlobal)
 
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~GROUP~~123-strat-5~C~0~0~0~OK")
-        assert.equals(2, requestedGlobal)
-
-        Mock.fireEvent("CHAT_MSG_ADDON", "MBOT", "STRATEGY_ACK~BOT~Bot~123-strat-6~C~0~0~0~OK")
-        assert.equals(2, requestedGlobal)
-        assert.same({ "Bot", "Bot" }, requestedSingle)
-
         NS.CB_RequestStates = oldReqGlobal
         NS.CB_RequestState  = oldReqSingle
     end)

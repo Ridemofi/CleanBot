@@ -112,7 +112,7 @@ Strategy toggles are dispatched natively by `NS.CB_SendStrategyToggle`:
 - `<stateScope>`: `C` for combat strategies (`prefix == "co"`), or `N` for non-combat strategies (`prefix == "nc"`).
 - `<encodedChanges>`: URL-encoded strategy change string (e.g. `+focus`, `+food,+drink`, `-aoe`).
 
-The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot evaluates `succeeded`, `failed`, and `reason`: if `succeeded > 0`, `failed > 0`, or `reason ~= "OK"`, it initiates a single-bot query via `CB_RequestState(target)` for `BOT` scope or a global `GET~STATES` query (`CB_RequestStates`) for `GROUP` scope to reconcile client state.
+The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot initiates a single-bot query via `CB_RequestState(target)` for `BOT` scope or a global `GET~STATES` query (`CB_RequestStates`) for `GROUP` scope to reconcile client state.
 
 *Exceptions*:
 - `wait for attack` toggles and numerical timers (`wait for attack time <N>`) fall back to chat commands.
@@ -198,7 +198,7 @@ skip tokens they do not use.
 | `FORMATIONS_BEGIN~<token>~<count>` | — | Marks start of formations batch |
 | `FORMATIONS_ITEM~<token>~<encodedBotName>~<encodedFormation>` | per-bot formation snapshot | Updates entry.formation for bot; clears awaitingFormation unconditionally |
 | `FORMATIONS_END~<token>~<sentCount>` | — | Clears formationsPending and refreshes UI controls |
-| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Evaluates succeeded, failed, and reason; triggers `CB_RequestState(target)` (`BOT` scope) or `CB_RequestStates()` (`GROUP` scope) when `succeeded > 0`, `failed > 0`, or `reason ~= "OK"` for UI reconciliation |
+| `STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>` | Strategy mutation acknowledgement | Triggers `CB_RequestState(target)` (`BOT` scope) or `CB_RequestStates()` (`GROUP` scope) for UI reconciliation |
 | `FORMATION_ACK~<scope>~<target>~<token>~<succeeded>~<failed>~<formation>` | formation change acknowledgement | Updates group members' formation if succeeded > 0; triggers re-fetch on failure |
 | `TALENT_SPEC_BEGIN~<encodedBotName>~<token>` | — | Resets talent specs staging buffer |
 | `TALENT_SPEC_CURRENT~<encodedBotName>~<token>~<activeSpec>~<tab1>~<tab2>~<tab3>` | `<activeSpec>` (1-based index) + 3 tab point counts | Available on server; not currently handled by CleanBot |

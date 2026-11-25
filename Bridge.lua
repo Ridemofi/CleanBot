@@ -2733,20 +2733,11 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             -- STRATEGY_ACK~<scope>~<target>~<token>~<stateScope>~<matched>~<succeeded>~<failed>~<reason>
             local rest = strsub(msg, 14)
             local scope, r2 = NS.CB_SplitOnce(rest, "~")
-            local target, r3 = NS.CB_SplitOnce(r2, "~")
-            local token, r4 = NS.CB_SplitOnce(r3, "~")
-            local stateScope, r5 = NS.CB_SplitOnce(r4, "~")
-            local matched, r6 = NS.CB_SplitOnce(r5, "~")
-            local succeeded, r7 = NS.CB_SplitOnce(r6, "~")
-            local failed, reason = NS.CB_SplitOnce(r7, "~")
-            local succCount = tonumber(succeeded) or 0
-            local failCount = tonumber(failed) or 0
-            if succCount > 0 or failCount > 0 or reason ~= "OK" then
-                if scope == "BOT" then
-                    NS.CB_RequestState(CB_UrlDecode(target))
-                else
-                    NS.CB_RequestStates()
-                end
+            local target = NS.CB_SplitOnce(r2, "~")
+            if scope == "BOT" then
+                NS.CB_RequestState(CB_UrlDecode(target))
+            else
+                NS.CB_RequestStates()
             end
 
         elseif msg and strsub(msg, 1, 14) == "FORMATION_ACK~" then
