@@ -842,7 +842,7 @@ local function CB_UpdateMemberRoleIcons(key)
 end
 
 -- Group-tab reaction to BOT_STATE_CHANGED: when a member of the selected group gets fresh
--- data (STATE~ packet, whisper reconcile, overheard command), the aggregate view refreshes
+-- data (STATE_END~ packet, whisper reconcile, overheard command), the aggregate view refreshes
 -- too — even for members not bound to an Individual slot.
 ---@param key string  Bot name-key whose entry just changed.
 NS.CB_On(NS.EV.BOT_STATE_CHANGED, function(key)

@@ -70,9 +70,7 @@ to chat. Also available as the Debug sub-tab's "Icon Browser" button (`NS.CB_Tog
 ## `/cleanbot debug knownbots`
 
 Opens the KnownBots popup window: handshake state, last `HELLO_ACK`, active overrides,
-the last raw `STATE~` payload (modern bridge packets do not update this value, displaying
-`(none received yet)` unless a legacy packet was received earlier), and each bot's parsed
-combat strategy flags grouped
+and each bot's parsed combat strategy flags grouped
 ON / OFF / unknown.
 
 ---

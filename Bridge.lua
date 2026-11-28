@@ -3,7 +3,7 @@
 --
 -- Owns the handshake, debounced sync, no-bridge whisper discovery,
 -- linked-account fetch, inventory fetch, quest fetch, the event
--- handler that parses ROSTER~ / DETAIL~ / STATE~ / INV_* / QUESTS_*
+-- handler that parses ROSTER~ / DETAIL~ / STATE_* / INV_* / QUESTS_*
 -- addon messages plus the co?/nc? whisper replies, and the item-link
 -- cleaning helper used before sending links over bot commands.
 -- ============================================================
@@ -50,7 +50,7 @@ local CLASS_ID_TOKENS = {
 -- ============================================================
 -- Bot discovery / roster helpers
 -- These support bot identification and class resolution during the
--- handshake and STATE~ packet handling below, so they live alongside the
+-- handshake and STATE_* packet handling below, so they live alongside the
 -- discovery state and probing logic. Called at event time, so they may
 -- reference helpers defined in earlier-loading files (CB_GroupInfo).
 -- ============================================================
@@ -95,12 +95,10 @@ end
 -- ============================================================
 -- Bridge / handshake state
 -- ============================================================
-NS.lastRawStates = nil
 NS.lastHelloAck  = nil
 NS.bridgeReady   = false
 -- Capability negotiation (CAPS) & state framing
 NS.capabilities          = {}
-NS.stateFramingCapable   = false
 NS.capabilitiesResolved  = false
 NS.capabilityBatchActive = false
 NS.stateRequests         = {}
@@ -109,7 +107,7 @@ NS.stateSeq              = 0
 
 -- Bridge availability: "unknown" until detection resolves, then "present"
 -- (HELLO_ACK received) or "absent" (detection timed out). Drives whether
--- strategy reads use GET~STATES (bridge) or co?/nc? whispers (no bridge).
+-- strategy reads use GET~STATES~<token> (bridge) or co?/nc? whispers (no bridge).
 NS.bridgeState   = "unknown"
 NS.probed        = {}   -- name-key -> true: party member already probed for bot-hood
 NS.awaitingProbe = {}   -- name-key -> true: probe co? sent, awaiting a "Strategies:" reply
@@ -557,7 +555,7 @@ NS.CB_RequestRosterThenRefresh = function()
 end
 
 -- Lightweight strategy-state re-sync (bridge path). Unlike
--- CB_RequestSync it sends ONLY GET~STATES (framed when capable) — no ROSTER/DETAILS
+-- CB_RequestSync it sends ONLY GET~STATES~<token> — no ROSTER/DETAILS
 -- and no RefreshTabs — so it reconciles strategy flags without tab/inspect churn.
 -- Used to verify whole-group strategy toggles or refresh upon opening the Group tab.
 NS.CB_RequestStates = function()
@@ -2250,7 +2248,6 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
         elseif msg and (msg == "CAPS_BEGIN" or strsub(msg, 1, 11) == "CAPS_BEGIN~") then
             NS.capabilities          = {}
-            NS.stateFramingCapable   = false
             NS.capabilitiesResolved  = false
             NS.capabilityBatchActive = true
 
@@ -2260,9 +2257,6 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 cap = cap:match("^%s*(.-)%s*$")
                 if cap ~= "" then
                     NS.capabilities[cap] = true
-                    if cap == "STATE_FRAMING_V1" then
-                        NS.stateFramingCapable = true
-                    end
                 end
             end
             if not NS.capabilityBatchActive then
@@ -2275,7 +2269,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
 
         elseif CB_EffectiveBridgeState() ~= "present" then
             -- Override forces the no-bridge path: ignore all inbound bridge data
-            -- packets (ROSTER~/DETAIL~/STATE~/INV_*/QUESTS_*) so the cache is only
+            -- packets (ROSTER~/DETAIL~/STATE_*/INV_*/QUESTS_*) so the cache is only
             -- ever populated via the whisper discovery path. Without this guard a
             -- real bridge would keep pushing strategy/inventory data and the
             -- "absent" simulation would be incomplete.
@@ -2320,7 +2314,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         elseif msg and strsub(msg, 1, 7) == "ROSTER~" then
             -- One packet packs EVERY bot: "Name,classId,level,mapId,alive,hp,mana;Name2,…"
             -- (";"-separated records, ","-separated fields; classId = Player::getClass()).
-            -- Seed each bot's identity + class here; DETAIL~/STATE~ fill in the rest.
+            -- Seed each bot's identity + class here; DETAIL~/STATE_* fill in the rest.
             for record in gmatch(strsub(msg, 8), "[^;]+") do
                 local name, r2  = NS.CB_SplitOnce(record, ",")
                 local classId   = NS.CB_SplitOnce(r2, ",")
@@ -2349,7 +2343,7 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
                 classKey = gsub(classKey, "%s+", "")
                 local key      = strlower(name)
                 local existing = CleanBot_PartyBots[key]
-                -- Bridge mode: strategy data arrives via GET~STATES (STATE~ packets),
+                -- Bridge mode: strategy data arrives via GET~STATES~ (STATE_* packets),
                 -- so DETAIL~ only establishes identity/class. Mutate existing entry in place
                 -- to preserve cached formation, lootStrategy, statsAt, and in-flight request state.
                 if existing then
@@ -2470,37 +2464,6 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
             local rest = strsub(msg, 13)
             local token = NS.CB_SplitOnce(rest, "~")
             CB_ClearStateRequest(token)
-
-        -- ── Strategy legacy snapshot (fallback) ─────────────────────────────
-        elseif msg and strsub(msg, 1, 6) == "STATE~" then
-            -- Bridge strategy snapshot for one bot: STATE~Name~combat~nonCombat
-            -- (combat / nonCombat are comma-separated strategy lists.)
-            NS.lastRawStates = msg
-            local rest             = strsub(msg, 7)
-            local name, r2         = NS.CB_SplitOnce(rest, "~")
-            local combatStr, ncStr = NS.CB_SplitOnce(r2,   "~")
-            name = name:match("^%s*(.-)%s*$")
-            if name and name ~= "" then
-                local key   = strlower(name)
-                local entry = CleanBot_PartyBots[key]
-                if not entry then
-                    -- STATE~ arrived before ROSTER~/DETAIL~; create a minimal entry.
-                    local class = NS.CB_ResolveClass(name, "WARRIOR")
-                    entry = {
-                        name      = name,
-                        class     = class,
-                        combat    = NS.CB_DefaultCombat(),
-                        nonCombat = NS.CB_DefaultNonCombat(),
-                        classData = NS.CB_DefaultClassData(class),
-                    }
-                    CleanBot_PartyBots[key] = entry
-                else
-                    entry.class = NS.CB_ResolveClass(name, entry.class)
-                end
-                NS.CB_StoreCombat(entry, combatStr)
-                NS.CB_StoreNonCombat(entry, ncStr)
-                if NS.CB_UpdateTabData then NS.CB_UpdateTabData(key) end
-            end
 
         elseif msg and strsub(msg, 1, 10) == "INV_BEGIN~" then
             local rest = strsub(msg, 11)
@@ -3443,7 +3406,6 @@ bridgeFrame:SetScript("OnEvent", function(self, event, ...)
         NS.bridgeState      = "unknown"
         NS.bridgeDetecting  = false
         NS.capabilities          = {}
-        NS.stateFramingCapable   = false
         NS.capabilitiesResolved  = false
         NS.capabilityBatchActive = false
         NS.stateRequests         = {}

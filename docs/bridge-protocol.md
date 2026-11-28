@@ -74,8 +74,8 @@ The server (`MultiBotBridge.cpp`) processes incoming text fields with `TryUrlDec
 2. **Probe** — client sends `HELLO~1`.
 3. **Resolve** — a reply starting `HELLO_ACK~` ⇒ `bridgeState = "present"`, accompanied
    by capability broadcast packets (`CAPS_BEGIN`, `CAPS~<list>`, `CAPS_END`), followed by
-   a debounced roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES` or
-   `GET~STATES~<token>`) and a linked-accounts fetch. No ack within **3 s** ⇒
+   a debounced roster sync (`GET~ROSTER` / `GET~DETAILS` / `GET~STATES~<token>`)
+   and a linked-accounts fetch. No ack within **3 s** ⇒
    `bridgeState = "absent"`, and discovery falls back to whisper probing (`co ?` to each
    group member; only bots reply with a `Strategies:` line).
 
@@ -112,7 +112,7 @@ Strategy toggles are dispatched natively by `NS.CB_SendStrategyToggle`:
 - `<stateScope>`: `C` for combat strategies (`prefix == "co"`), or `N` for non-combat strategies (`prefix == "nc"`).
 - `<encodedChanges>`: URL-encoded strategy change string (e.g. `+focus`, `+food,+drink`, `-aoe`).
 
-The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot initiates a single-bot query via `CB_RequestState(target)` for `BOT` scope or a global `GET~STATES` query (`CB_RequestStates`) for `GROUP` scope to reconcile client state.
+The server replies with `STRATEGY_ACK` (see Inbound packets). CleanBot initiates a single-bot query via `CB_RequestState(target)` for `BOT` scope or a global `GET~STATES~<token>` query (`CB_RequestStates`) for `GROUP` scope to reconcile client state.
 
 *Exceptions*:
 - `wait for attack` toggles and numerical timers (`wait for attack time <N>`) fall back to chat commands.
@@ -145,9 +145,8 @@ allowlisted, so they whisper and their replies arrive via `CHAT_MSG_WHISPER` as 
 |---|---|---|
 | `GET~ROSTER` | Bot names in the group | `ROSTER~` |
 | `GET~DETAILS` | Per-bot identity/class | `DETAIL~` |
-| `GET~STATES~<token>` | Framed strategy snapshot (`STATE_FRAMING_V1` capable) | `STATES_BEGIN~` / `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATES_END~` / `STATE_ABORT~` |
+| `GET~STATES~<token>` | Framed strategy snapshot | `STATES_BEGIN~` / `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATES_END~` / `STATE_ABORT~` |
 | `GET~STATE~<botName>~<token>` | Single-bot strategy snapshot | `STATE_BEGIN~` / `STATE_ITEM~` / `STATE_END~` / `STATE_ABORT~` |
-| `GET~STATES` | Per-bot strategy snapshot (legacy fallback) | `STATE~` |
 | `GET~INVENTORY~<botName>~inv` | Bot's bag contents + money | `INV_BEGIN~` / `INV_SUMMARY~` / `INV_ITEM~` / `INV_END~` |
 | `GET~INVENTORY_EXACT~<botName>~<token>` | Bot's bag contents with exact coordinates (`INVENTORY_EXACT_V1`) | `INV_EXACT_BEGIN~` / `INV_BAG~` / `INV_ITEM_LOC~` / `INV_EXACT_END~` |
 | `GET~BANK~<botName>~<token>` | Bot's bank contents | `BANK_BEGIN~` / `BANK_ITEM~` / `BANK_ERROR~` / `BANK_END~` |
@@ -179,7 +178,7 @@ skip tokens they do not use.
 | `HELLO_ACK~…` | — | Drives the real state machine (see below) |
 | `ERR~<safeOpcode>~<safeRequestType>~<safeToken>~<reason>` | 4-field protocol error | Available on server; not currently handled by CleanBot |
 | `CAPS_BEGIN` | — | Resets capabilities table and initiates capability batch |
-| `CAPS~<c1>,<c2>,…` | comma-separated capabilities | Populates `NS.capabilities`; detects `STATE_FRAMING_V1` (`NS.stateFramingCapable`) |
+| `CAPS~<c1>,<c2>,…` | comma-separated capabilities | Populates `NS.capabilities` |
 | `CAPS_END` | — | Marks `NS.capabilitiesResolved = true` |
 | `ROSTER~<rec>;<rec>;…` | one record per bot: `<name>,<classId>,<level>,<mapId>,<alive>,<hp%>,<mana%>` (`classId` = numeric `Player::getClass()`) | Seeds a minimal entry (name + class) for each unknown bot |
 | `DETAIL~<name>~<race>~<gender>~<className>~<level>~<talentTab0>~<talentTab1>~<talentTab2>~<itemLevelScore>` | 9 fields exact bot detail | Establishes identity/class (CleanBot parses name and class; ignores level/talents/ilvl fields); preserves strategy data already parsed |
@@ -189,7 +188,7 @@ skip tokens they do not use.
 | `STATE_END~<token>~<name>~<cCount>~<nCount>` | ends bot state stream | Assembles strategies, calls `CB_StoreCombat` / `CB_StoreNonCombat` and refreshes |
 | `STATES_END~<token>~<sentCount>` | ends global state sync | Clears request token, refreshes tabs |
 | `STATE_ABORT~<token>~<name>~<reason>` | abort notification | Clears active buffers and request token |
-| `STATE~<name>~<combat>~<nonCombat>` | comma-separated strategy lists (legacy fallback) | Stored via `CB_StoreCombat` / `CB_StoreNonCombat` |
+| `STATE~<name>~<combat>~<nonCombat>` | comma-separated strategy lists (legacy fallback) | Available on server; not handled by CleanBot |
 | `INV_BEGIN~<name>~…` | — | Resets `entry.inventory = { items = {} }` |
 | `INV_SUMMARY~<name>~<token>~<gold>~<silver>~<copper>~<bagUsed>~<bagTotal>` | money + bag counts | Bag is **used/total** (the whisper-path `stats` reply is free/total — converted on parse) |
 | `INV_ITEM~<name>~<token>~<encodedItem>` | one item per packet | Decoded by `NS.CB_ParseItemLine` |

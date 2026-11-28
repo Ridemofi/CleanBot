@@ -11,8 +11,8 @@ local NS = CleanBotNS
 -- ============================================================
 local debugKnownBotsFrame = nil
 
---- Builds the multi-line diagnostic text dump: handshake state, the last raw
---- STATES payload, and per-bot parsed combat strategy flags.
+--- Builds the multi-line diagnostic text dump: handshake state
+--- and per-bot parsed combat strategy flags.
 ---@return string  The formatted report, or a placeholder when no bots are known.
 local function CB_FormatKnownBots()
     local lines = {
@@ -23,9 +23,6 @@ local function CB_FormatKnownBots()
         "=== Debug Overrides ===",
         "Bridge override : " .. (NS.debugBridgeOverride or "none (auto)"),
         "Simulate mode   : " .. (NS.debugSimulate and "ON" or "OFF"),
-        "",
-        "=== Last raw STATES payload ===",
-        NS.lastRawStates or "(none received yet)",
         "",
         "=== Parsed KnownBots ===",
         "",

@@ -554,7 +554,7 @@ NS.CB_ParseClassStr = function(msg, class, section)
 end
 
 -- ============================================================
--- Strategy storage helpers (shared by bridge GET~STATES and
+-- Strategy storage helpers (shared by bridge GET~STATES~<token> and
 -- the no-bridge co?/nc? whisper read paths)
 -- ============================================================
 
