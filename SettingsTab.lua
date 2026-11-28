@@ -1038,9 +1038,13 @@ NS.CleanBot_BuildSettingsTab = function()
         "Print every NotifyInspect call from any addon, tagged CleanBot or EXTERNAL (session only; not saved).",
         diagHeader, function(v) NS.CB_SetInspectTrace(v) end)
 
+    local logRequestsCB = CB_MakeDebugCheck("CleanBotDebugLogRequestsCB", "Log Bridge Requests",
+        "Print every outgoing MBOT bridge request sent by CleanBot to chat (session only; not saved).",
+        traceCB, function(v) NS.CB_SetDebugLogRequests(v) end)
+
     local knownBotsBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugKnownBotsBtn", "Known Bots", 110, 22,
         function() NS.CB_ShowDebugKnownBots() end)
-    NS.CB_AnchorBelow(knownBotsBtn, traceCB)
+    NS.CB_AnchorBelow(knownBotsBtn, logRequestsCB)
 
     local timingBtn = NS.CB_CreateButton(debugPanel, "CleanBotDebugTimingBtn", "Measure Reply Timing", 150, 22,
         function() NS.CB_RunTimingMeasure(3) end)
@@ -1067,6 +1071,7 @@ NS.CleanBot_BuildSettingsTab = function()
         simulateCB:SetChecked(NS.debugSimulate and true or false)
         verifyCB:SetChecked(NS.debugVerify and true or false)
         traceCB:SetChecked(NS.debugInspectTrace and true or false)
+        logRequestsCB:SetChecked(NS.debugLogRequests and true or false)
         layoutTestCB:SetChecked(NS.layoutTestButtons and true or false)
     end
     NS.CB_RefreshDebugTab()

@@ -203,6 +203,13 @@ NS.CB_SetDebugVerify = function(on)
     CB_RefreshDebugTabIfBuilt()
 end
 
+---@param on boolean  Whether CB_SendBridge prints every outgoing MBOT request (session only).
+NS.CB_SetDebugLogRequests = function(on)
+    NS.debugLogRequests = on and true or false
+    NS.CB_Print("Bridge request logging: " .. (NS.debugLogRequests and "|cff00ff00ON|r" or "|cffff4444OFF|r") .. ".")
+    CB_RefreshDebugTabIfBuilt()
+end
+
 -- Shows/hides the Settings → Debug sub-tab (persisted). The tab widget itself
 -- is managed by SettingsTab.lua via NS.CB_SetDebugTabVisible.
 ---@param on boolean  Whether the Debug sub-tab is available in Settings.

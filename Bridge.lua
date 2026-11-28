@@ -128,6 +128,9 @@ NS.CB_EffectiveBridgeState = CB_EffectiveBridgeState
 
 -- Uses RAID or PARTY in a group and WHISPER to the player when solo.
 local function CB_SendBridge(msg)
+    if NS.debugLogRequests then
+        NS.CB_Print("|cff88ccff[OUT]|r " .. tostring(msg))
+    end
     if GetNumRaidMembers() > 0 then
         SendAddonMessage("MBOT", msg, "RAID")
     elseif GetNumPartyMembers() > 0 then
@@ -148,6 +151,8 @@ NS.debugSimulate       = false ---@type boolean
 -- When true, strategy toggles log any optimistic-vs-actual mismatch after the
 -- authoritative state comes back (see CB_SendStrategyToggle / CB_VerifyStrategyExpect).
 NS.debugVerify         = false ---@type boolean
+-- When true, CB_SendBridge prints every outgoing MBOT request to chat (session only).
+NS.debugLogRequests    = false ---@type boolean
 
 -- Pause whisper-based bot discovery while initial bridge detection is pending.
 -- If no bridge responds, probe group members after the detection timeout.

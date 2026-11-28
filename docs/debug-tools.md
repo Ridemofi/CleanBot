@@ -8,7 +8,8 @@ Slash commands and the Debug sub-tab route through shared setters
 (`NS.CB_SetBridgeOverride`, `NS.CB_SetDebugSimulate`, `NS.CB_SetDebugVerify`,
 `NS.CB_SetDebugTabEnabled`, `NS.CB_SetInspectTrace`), so chat and UI always agree.
 The Debug UI also provides UI-only setters like `NS.CB_SetLayoutTestButtons`
-(shows or hides the layout test buttons).
+(shows or hides the layout test buttons) and `NS.CB_SetDebugLogRequests`
+(prints every outgoing `MBOT` bridge request sent by CleanBot to chat).
 
 ---
 
@@ -86,4 +87,5 @@ ON / OFF / unknown.
   active bridge override, simulate mode, and verify logging.
 - **Persistence** — `debugTabEnabled`, `debugBridgeOverride`, `debugSimulate`,
   `debugVerify`, and `layoutTestButtons` persist in `CleanBot_SavedVars`.
-  These settings persist across sessions. The inspect trace is the exception (session-only).
+  These settings persist across sessions. The inspect trace (`NS.debugInspectTrace`)
+  and bridge request logging (`NS.debugLogRequests`) are the exceptions (session-only).
